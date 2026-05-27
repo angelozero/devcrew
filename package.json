@@ -1,0 +1,42 @@
+{
+  "name": "devcrew",
+  "version": "1.0.0",
+  "description": "AI Team Setup for Any Project — scaffold an AI-powered development team with one command",
+  "type": "module",
+  "bin": {
+    "devcrew": "./bin/devcrew.mjs"
+  },
+  "main": "./src/index.mjs",
+  "scripts": {
+    "start": "node bin/devcrew.mjs",
+    "test": "node --test src/**/*.test.mjs"
+  },
+  "keywords": [
+    "ai",
+    "claude",
+    "maestri",
+    "agents",
+    "development-team",
+    "cli",
+    "scaffold",
+    "workflow"
+  ],
+  "author": "Angelo Zero <angelozero@github.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/angelozero/devcrew.git"
+  },
+  "homepage": "https://github.com/angelozero/devcrew",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "handlebars": "^4.7.8",
+    "inquirer": "^12.6.0",
+    "js-yaml": "^4.1.1",
+    "ora": "^8.2.0"
+  }
+}
