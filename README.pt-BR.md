@@ -1,170 +1,103 @@
-# 🚀 DevCrew — Setup de Time de IA para Qualquer Projeto
+# 🚀 DevCrew
 
-🇺🇸 [Read in English](README.md)
+**Setup de Time de IA para Qualquer Projeto** — Monte um workspace de desenvolvimento com IA em um único comando.
 
-**DevCrew** monta um time de desenvolvimento com IA na sua máquina. Um comando, responda algumas perguntas, e seu time inteiro de IA está pronto para trabalhar via [Maestri](https://maestri.app).
+O DevCrew gera um ambiente completo de desenvolvimento com IA usando [Claude Code](https://docs.anthropic.com/en/docs/claude-code) + [Maestri](https://maestri.app), com 5 agentes especializados que automatizam todo o pipeline de desenvolvimento.
 
-> Assim como um template de projeto te dá arquitetura e boilerplate — **DevCrew te dá um time de IA, pré-configurado com o contexto do seu projeto, pronto para executar tarefas.**
+## O Que Ele Faz
 
-## Conceito-Chave: Times Totalmente Dinâmicos
+Um comando configura:
+- 📄 **CLAUDE.md** — Contexto do projeto (com integração Confluence)
+- 🤖 **5 Agentes de IA** — Tech Lead, Developer, Business Analyst, Quality Guard, Sentinel
+- 📋 **Pipeline de Qualidade** — Workflow automatizado de 8 fases
+- 🔗 **Workspace Maestri** — Terminais conectados para orquestração de agentes
+- ⚙️ **Config Claude Code** — Permissões e definições de workflow
 
-DevCrew **não** te prende a papéis fixos como "Dev Backend" ou "Dev Frontend". Você define seus próprios membros durante o setup — podem ser qualquer coisa:
+## Os 5 Agentes Padrão
 
-- Dev Backend + Dev Frontend + QA
-- Engenheiro de Dados + Engenheiro ML + DevOps
-- Dev API + Dev Mobile + Analista de Segurança
-- Ou qualquer combinação que seu projeto precise
+| Agente | Papel | O Que Faz |
+|--------|-------|-----------|
+| 🟣 Tech Lead | Orquestrador | Recebe tarefas, delega, executa o pipeline |
+| 🟢 Developer | Executor | Implementa features, escreve testes, faz commits |
+| 📋 Business Analyst | Validador | Valida contra regras de negócio |
+| 🔍 Quality Guard | Validador | Revisa qualidade, segurança, cobertura de testes |
+| 👁️ Sentinel | Monitor | Verifica branches, monitora logs de CI/CD |
+
+## O Pipeline de Qualidade
+
+```
+Humano → Tech Lead → Developer → Biz Analyst → Quality Guard → Sentinel → Humano (aprova) → PR → Deploy
+```
+
+1. **Implementação** — Developer constrói a feature
+2. **Validação de Negócio** — Biz Analyst verifica regras
+3. **Revisão de Qualidade** — Quality Guard revisa o código
+4. **Verificação de Branch** — Sentinel verifica a develop
+5. **Aprovação de Commit** — Humano aprova
+6. **PR + Merge** — Humano no GitHub
+7. **Monitoramento de Deploy** — Sentinel acompanha CI/CD
+8. **Promoção** — Humano valida, promove para o próximo ambiente
 
 ## Início Rápido
 
+### Para o Tech Lead (primeira vez)
+
 ```bash
-# Instalar globalmente
-npm install -g devcrew
+npx devcrew init --architect
+```
 
-# Montar seu time de IA
-devcrew init --architect    # Arquiteto/Tech Lead: define estrutura do projeto
-devcrew init                # Desenvolvedor: consome project.yaml existente
+Passa por 5 rodadas:
+1. Identidade do projeto + convenções
+2. Repositórios
+3. Contexto do projeto (Confluence, docs, regras)
+4. Agentes (aceitar padrões ou customizar)
+5. Confirmação
 
-# Verificar status
-devcrew status
+### Para Desenvolvedores (após setup do Tech Lead)
+
+```bash
+git pull  # pegar o project.yaml
+npx devcrew init
+```
+
+### Atualizando (quando project.yaml muda)
+
+```bash
+npx devcrew update          # merge inteligente — preserva suas customizações
+npx devcrew update --force  # sobrescreve arquivos de agentes
+```
+
+### Verificar Status
+
+```bash
+npx devcrew status
 ```
 
 ## Como Funciona
 
-### Adoção em Duas Fases
+1. Tech Lead roda `devcrew init --architect` → responde o wizard → gera `project.yaml` + todos os arquivos de config
+2. Tech Lead faz commit do `project.yaml` no repositório
+3. Cada desenvolvedor roda `devcrew init` → lê o `project.yaml` → gera seu workspace local
+4. Todos abrem o Maestri → falam com o terminal do Tech Lead → a IA cuida do resto
 
-```
-Fase 1: ARQUITETO / TECH LEAD (pioneiros)
-┌─────────────────────────────────────────────────────┐
-│  devcrew init --architect                           │
-│  Define projeto, frentes/squads, membros, repos     │
-│  Saída: project.yaml + setup completo do time IA    │
-└─────────────────────────────────────────────────────┘
-                        ↓
-Fase 2: DESENVOLVEDOR (consumidor)
-┌─────────────────────────────────────────────────────┐
-│  devcrew init                                       │
-│  Seleciona sua frente, aponta para repos locais     │
-│  Saída: time de IA personalizado, pronto pra codar  │
-└─────────────────────────────────────────────────────┘
-```
+## Flexibilidade
 
-### O Que É Gerado
+- **Adicione agentes customizados** durante o setup ou depois
+- **Evolua o workspace** com `devcrew update`
+- **Autonomia do dev** — desenvolvedores podem criar seus próprios agentes
+- **Qualquer stack** — funciona com qualquer linguagem, framework ou toolchain
+- **Integração Confluence** — carrega contexto do projeto automaticamente (requer Confluence MCP)
 
-| Arquivo | Descrição |
-|---------|-----------|
-| `project.yaml` | Configuração do projeto (compartilhe com o time) |
-| `CLAUDE.md` | Contexto do projeto para todos os agentes |
-| `.claude/agents/` | Um agente por membro do time |
-| `.claude/WORKFLOW.md` | Topologia do time e regras de delegação |
-| `.claude/settings.json` | Permissões do Claude Code |
-| Workspace Maestri | Terminais conectados, prontos para usar |
+## Requisitos
 
-### Membros Dinâmicos do Time
-
-Você define seu time durante o wizard. Cada membro se torna:
-- Um **terminal no Maestri** com seu próprio diretório de trabalho
-- Uma **definição de agente** (`.claude/agents/<slug>.md`) com instruções específicas do papel
-- Uma **conexão** com o orquestrador (Tech Lead)
-
-O primeiro membro é sempre o **orquestrador** (Tech Lead) que delega para todos os outros.
-
-## Suporte Multi-Frente
-
-Projetos grandes com múltiplos squads/frentes são totalmente suportados:
-
-```yaml
-# project.yaml
-fronts:
-  - name: "Farmácia"
-    repos:
-      - name: api
-        path: hospital-farmacia-api
-        stack: "Java + Spring Boot"
-      - name: web
-        path: hospital-farmacia-web
-        stack: "React + TypeScript"
-
-  - name: "Médicos"
-    repos:
-      - name: api
-        path: hospital-medicos-api
-        stack: "Node.js + Express"
-```
-
-Cada desenvolvedor seleciona sua frente durante `devcrew init` e recebe um setup personalizado.
-
-## Pré-requisitos
-
-- [Node.js](https://nodejs.org/) >= 18
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI instalado
-- [Maestri](https://maestri.app) (macOS) para orquestração multi-terminal com IA
-
-## Exemplos de Uso
-
-### Exemplo 1: Projeto Simples
-
-```bash
-cd /caminho/do/meu-projeto
-devcrew init --architect
-
-# O wizard pergunta:
-# 1. Nome do projeto, organização, descrição
-# 2. Frentes e repositórios (dinâmico)
-# 3. Membros do time (você define!)
-# 4. Convenções (branch, commits, testes)
-# 5. Confirmação
-
-# Pronto! Abra o Maestri e comece a trabalhar.
-```
-
-### Exemplo 2: Projeto Multi-Frente
-
-```bash
-cd /caminho/do/projeto-hospital
-devcrew init --architect
-
-# Define 3 frentes: Farmácia, Médicos, Pacientes
-# Define time: Tech Lead, Dev API, Dev Web, QA
-# Gera project.yaml
-
-# Compartilhe com seu time
-git add project.yaml && git commit -m "chore: add DevCrew config"
-
-# Cada desenvolvedor roda:
-devcrew init
-# Seleciona sua frente, aponta para repos locais
-```
-
-### Exemplo 3: Dry Run
-
-```bash
-devcrew init --architect --dry-run
-# Visualiza o que seria gerado sem escrever arquivos
-```
-
-## Trabalhando com Maestri
-
-Após o setup, abra o Maestri e você verá seu workspace com terminais conectados:
-
-```
-  ● Tech Lead (orquestrador)
-     ├── ● Dev API
-     ├── ● Dev Web
-     └── ● QA Tester
-```
-
-Clique no terminal do **Tech Lead** e comece a dar instruções. O Tech Lead vai delegar para os membros apropriados do time.
-
-## Evoluindo Seu Setup
-
-O setup inicial é um **ponto de partida**. Você pode evoluí-lo:
-
-- **Manualmente no Maestri**: Adicione/remova terminais, reorganize conexões
-- **Re-rode o wizard**: `devcrew init --architect` para regenerar com mudanças
-- **Edite arquivos diretamente**: Modifique `CLAUDE.md`, arquivos de agente, ou `WORKFLOW.md`
-- **Futuro**: Extração automática de contexto do Confluence/documentação
+- Node.js >= 18
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [Maestri](https://maestri.app)
 
 ## Licença
 
-MIT — [Angelo Zero](https://github.com/angelozero)
+MIT
+
+---
+
+🇺🇸 [Read in English](README.md)

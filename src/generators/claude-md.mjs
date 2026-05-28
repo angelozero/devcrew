@@ -2,11 +2,13 @@
  * Generates CLAUDE.md — Project context file for all agents
  *
  * This is the most important generated file. Every agent reads it
- * to understand the project, stack, conventions, and team topology.
+ * to understand the project, stack, conventions, team topology,
+ * and the 8-phase quality pipeline.
  */
 
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { processContext } from '../context/confluence.mjs';
 
 /**
  * @param {object} config - Configuration from wizard
@@ -14,7 +16,7 @@ import { resolve } from 'node:path';
  */
 export async function generateClaudeMd(config, opts = {}) {
   const outputPath = resolve(config.cwd, 'CLAUDE.md');
-  const content = buildClaudeMd(config);
+  const content = await buildClaudeMd(config);
 
   if (opts.dryRun) {
     return { preview: outputPath };
@@ -24,12 +26,51 @@ export async function generateClaudeMd(config, opts = {}) {
   return { path: outputPath };
 }
 
-function buildClaudeMd(config) {
-  const { project, fronts, conventions, team } = config;
-  const selectedFront = config.selectedFront
-    ? fronts.find((f) => f.name === config.selectedFront) || fronts[0]
-    : fronts[0];
+/**
+ * Build the full CLAUDE.md markdown string.
+ *
+ * @param {object} config - Wizard config (new V0 shape)
+ * @returns {Promise<string>} Markdown content
+ */
+async function buildClaudeMd(config) {
+  const { project, repos, conventions, agents } = config;
 
+  // ── Process context (load files, validate URLs) ──────────────────
+  const ctx = project.context
+    ? await processContext(project.context, config.cwd)
+    : { confluenceUrl: null, loadedFiles: [], manual: '', businessRules: '', technicalRules: '' };
+
+  let md = '';
+
+  // ── 1. Project Overview ──────────────────────────────────────────
+  md += buildProjectOverview(project, ctx);
+
+  // ── 2. Project Context ───────────────────────────────────────────
+  md += buildProjectContext(ctx);
+
+  // ── 3. Repository Structure ──────────────────────────────────────
+  md += buildRepositoryStructure(repos);
+
+  // ── 4. Conventions ───────────────────────────────────────────────
+  md += buildConventions(conventions);
+
+  // ── 5. Agents ────────────────────────────────────────────────────
+  md += buildAgents(agents);
+
+  // ── 6. Quality Pipeline ──────────────────────────────────────────
+  md += buildPipeline();
+
+  // ── 7. Delegation Protocol ───────────────────────────────────────
+  md += buildDelegationProtocol();
+
+  return md;
+}
+
+/* ================================================================
+ * Section builders
+ * ================================================================ */
+
+function buildProjectOverview(project, ctx) {
   let md = `# CLAUDE.md
 
 ## Project Overview
@@ -37,38 +78,114 @@ function buildClaudeMd(config) {
 - **Project**: ${project.name}
 - **Organization**: ${project.organization}
 - **Description**: ${project.description}
-${project.confluence ? `- **Documentation**: ${project.confluence}` : ''}
-${config.selectedFront ? `- **Front/Squad**: ${config.selectedFront}` : ''}
+`;
 
+  if (ctx.confluenceUrl) {
+    md += `- **Confluence**: ${ctx.confluenceUrl} (use Confluence MCP to access)\n`;
+  }
+
+  md += `
 ---
 
-## Repository Structure
+`;
+  return md;
+}
+
+function buildProjectContext(ctx) {
+  const hasBusinessRules = ctx.businessRules && ctx.businessRules.trim().length > 0;
+  const hasTechnicalRules = ctx.technicalRules && ctx.technicalRules.trim().length > 0;
+  const hasManual = ctx.manual && ctx.manual.trim().length > 0;
+  const hasFiles = ctx.loadedFiles && ctx.loadedFiles.length > 0;
+  const hasConfluence = ctx.confluenceUrl;
+
+  // Skip the entire section if there's nothing to show
+  if (!hasBusinessRules && !hasTechnicalRules && !hasManual && !hasFiles && !hasConfluence) {
+    return '';
+  }
+
+  let md = `## Project Context
 
 `;
 
-  // Add repos for the selected front (or all fronts in architect mode)
-  const frontsToDocument = config.selectedFront ? [selectedFront] : fronts;
+  if (hasBusinessRules) {
+    md += `### Business Rules
 
-  for (const front of frontsToDocument) {
-    if (fronts.length > 1) {
-      md += `### Front: ${front.name}\n\n`;
-      if (front.description) {
-        md += `${front.description}\n\n`;
-      }
-    }
+${ctx.businessRules.trim()}
 
-    for (const repo of front.repos) {
-      md += `#### ${repo.name} — \`${repo.localPath || repo.path}\`\n\n`;
-      md += `- **Stack**: ${repo.stack}\n`;
-      md += `- **Package Manager**: ${repo.package_manager}\n`;
-      md += `\n`;
+`;
+  }
+
+  if (hasTechnicalRules) {
+    md += `### Technical Rules
+
+${ctx.technicalRules.trim()}
+
+`;
+  }
+
+  if (hasManual) {
+    md += `### Additional Context
+
+${ctx.manual.trim()}
+
+`;
+  }
+
+  if (hasFiles) {
+    md += `### Reference Documents
+
+`;
+    for (const file of ctx.loadedFiles) {
+      md += `#### ${file.path}
+${file.content}
+
+`;
     }
   }
 
-  // Conventions
+  if (hasConfluence) {
+    md += `> 💡 If a Confluence MCP is configured, agents can access live documentation at:
+> ${ctx.confluenceUrl}
+
+`;
+  }
+
   md += `---
 
-## Conventions
+`;
+  return md;
+}
+
+function buildRepositoryStructure(repos) {
+  if (!repos || repos.length === 0) {
+    return '';
+  }
+
+  let md = `## Repository Structure
+
+`;
+
+  for (const repo of repos) {
+    md += `### ${repo.name} — \`${repo.path}\`
+
+- **Stack**: ${repo.stack}
+- **Package Manager**: ${repo.package_manager}
+
+`;
+  }
+
+  md += `---
+
+`;
+  return md;
+}
+
+function buildConventions(conventions) {
+  if (!conventions) {
+    return '';
+  }
+
+  let md = `## Conventions
 
 ### Commit Messages
 
@@ -115,26 +232,83 @@ ${conventions.codingStandards.map((s) => `- ${s}`).join('\n')}
 `;
   }
 
-  // Team
   md += `---
 
-## Team
+`;
+  return md;
+}
 
-| Member | Agent ID | Description |
-|--------|----------|-------------|
+function buildAgents(agents) {
+  if (!agents || agents.length === 0) {
+    return '';
+  }
+
+  let md = `## Agents
+
+| Agent | ID | Role | Description |
+|-------|-----|------|-------------|
 `;
 
-  for (const member of team.members) {
-    md += `| ${member.name} | \`${member.slug}\` | ${member.description} |\n`;
+  for (const agent of agents) {
+    md += `| ${agent.name} | \`${agent.slug}\` | ${agent.role} | ${agent.description} |\n`;
   }
 
   md += `
-### Delegation Protocol
+---
 
-The **Tech Lead** orchestrates all work. To delegate:
+`;
+  return md;
+}
+
+function buildPipeline() {
+  return `## Quality Pipeline
+
+The development pipeline follows 8 phases. The Tech Lead orchestrates this automatically after receiving a task.
+
+### Phase 1 — Implementation
+**Agent**: Developer
+The Developer implements the feature, writes tests, and follows project patterns.
+
+### Phase 2 — Business Rules Validation
+**Agent**: Business Analyst
+Validates the implementation against business rules and requirements.
+
+### Phase 3 — Quality Review
+**Agent**: Quality Guard
+Reviews code quality, test coverage, patterns, security, and token efficiency.
+
+### Phase 4 — Branch Verification
+**Agent**: Sentinel
+Checks the develop branch for conflicts. If conflicts exist, Developer resolves them.
+
+### Phase 5 — Commit Approval
+**Actor**: Human
+The human reviews the validation chain results and approves the commit.
+
+### Phase 6 — PR + Merge
+**Actor**: Human (on GitHub)
+The human reviews and merges the PR on GitHub.
+
+### Phase 7 — Deploy Monitoring
+**Agent**: Sentinel
+Monitors CI/CD pipeline logs. Reports infrastructure errors to human, code errors to Developer.
+
+### Phase 8 — Promotion
+**Actor**: Human + Sentinel
+After human validation in the environment, promotes to next stage (dev → homolog → prod).
+
+---
+
+`;
+}
+
+function buildDelegationProtocol() {
+  return `## Delegation Protocol
+
+The **Tech Lead** orchestrates all work. To delegate to an agent:
 
 \`\`\`
-maestri ask "<Member Name>" "<Task description with full context>"
+maestri ask "<Agent Name>" "<Task description with full context>"
 \`\`\`
 
 Always include:
@@ -148,22 +322,6 @@ Always include:
 - Each agent has its own .md file in \`.claude/agents/\`
 - The Tech Lead delegates via Maestri connections
 - Agents report back to the Tech Lead when done
-
+- The pipeline phases are followed in order for every task
 `;
-
-  // Multi-front note
-  if (fronts.length > 1 && !config.selectedFront) {
-    md += `---
-
-## Project Fronts
-
-This project has ${fronts.length} fronts/squads:
-
-${fronts.map((f) => `- **${f.name}**${f.description ? `: ${f.description}` : ''}`).join('\n')}
-
-Each developer runs \`devcrew init\` and selects their front to get a personalized setup.
-`;
-  }
-
-  return md;
 }

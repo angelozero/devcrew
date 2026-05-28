@@ -4,6 +4,9 @@
  * Routes to architect mode (--architect) or developer mode (default).
  * If project.yaml exists and no --architect flag, uses developer mode.
  * If no project.yaml and no --architect flag, falls back to standalone wizard.
+ *
+ * V0 model: 1 workspace template with 5 default AI agents.
+ * Config uses repos[] (flat), agents[] (with roles), and project.context.
  */
 
 import { existsSync } from 'node:fs';
@@ -28,7 +31,7 @@ export async function init(options = {}) {
 
   if (options.architect) {
     // Architect / Tech Lead mode — pioneer mode
-    console.log(chalk.yellow('🏗️  Architect Mode') + ' — Define project structure and generate project.yaml\n');
+    console.log(chalk.yellow('🏗️  Architect Mode') + ' — Define project structure, agents, and generate project.yaml\n');
     config = await architectWizard(cwd);
   } else if (hasProjectYaml) {
     // Developer mode — project.yaml exists

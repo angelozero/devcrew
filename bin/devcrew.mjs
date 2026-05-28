@@ -5,6 +5,7 @@
  *
  * Usage:
  *   devcrew init [--architect] [--dry-run]   Scaffold an AI-powered dev team
+ *   devcrew update [--force]                 Update config from project.yaml
  *   devcrew status                           Show current DevCrew configuration
  */
 
@@ -37,6 +38,15 @@ program
   .description('Show current DevCrew configuration status')
   .action(async () => {
     await status();
+  });
+
+program
+  .command('update')
+  .description('Update DevCrew configuration from project.yaml (preserves customizations)')
+  .option('-f, --force', 'Overwrite existing agent files (ignores customizations)')
+  .action(async (opts) => {
+    const { update } = await import('../src/commands/update.mjs');
+    await update({ force: opts.force });
   });
 
 program.parse();

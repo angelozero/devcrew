@@ -1,16 +1,15 @@
 /**
  * Generates Maestri workspace — workspace.json + manifest registration
  *
- * Creates a Maestri workspace with:
- * - One terminal per team member (claude_code type)
- * - Text labels for each terminal
- * - Connections from orchestrator (Tech Lead) to all other members
- * - Registers workspace in ~/.maestri/manifest.json
+ * Uses the new V0 config shape:
+ *   config.agents[] with role field
+ *   config.cwd as the single working directory for all agents
+ *   One workspace per project (no fronts/selectedFront)
  *
- * The workspace is an INITIAL structure. It can be evolved:
- * - Manually by the user in Maestri (add/remove terminals, connections)
- * - By re-running devcrew init with updated project.yaml
- * - By reading documentation (Confluence, etc.) in future versions
+ * Layout:
+ *   - Orchestrator terminal at top center
+ *   - Other agent terminals in a row below
+ *   - Connections from orchestrator to all other agents
  */
 
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -22,18 +21,11 @@ const MAESTRI_DIR = join(homedir(), '.maestri');
 const MANIFEST_PATH = join(MAESTRI_DIR, 'manifest.json');
 
 /**
- * @param {object} config - Configuration from wizard
+ * @param {object} config - Configuration from wizard (V0 shape)
  * @param {object} opts - { dryRun: boolean }
  */
 export async function generateMaestriWorkspace(config, opts = {}) {
-  const { project, fronts, team } = config;
-  const selectedFront = config.selectedFront
-    ? fronts.find((f) => f.name === config.selectedFront) || fronts[0]
-    : fronts[0];
-
-  const workspaceName = config.selectedFront
-    ? `${project.name} — ${config.selectedFront}`
-    : project.name;
+  const workspaceName = config.project.name;
 
   if (opts.dryRun) {
     return { preview: `Maestri workspace "${workspaceName}" in ~/.maestri/workspaces/` };
@@ -45,7 +37,7 @@ export async function generateMaestriWorkspace(config, opts = {}) {
 
   mkdirSync(workspaceDir, { recursive: true });
 
-  const workspace = buildWorkspace(config, selectedFront);
+  const workspace = buildWorkspace(config);
   writeFileSync(workspacePath, JSON.stringify(workspace, null, 2), 'utf-8');
 
   registerInManifest(workspaceId, workspaceName);
@@ -55,10 +47,10 @@ export async function generateMaestriWorkspace(config, opts = {}) {
 
 /**
  * Build the workspace JSON matching Maestri's schema v2.
- * Layout: Orchestrator at top center, other members in a row below.
+ * Layout: Orchestrator at top center, other agents in a row below.
  */
-function buildWorkspace(config, selectedFront) {
-  const { team } = config;
+function buildWorkspace(config) {
+  const { agents } = config;
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
   const nodes = [];
@@ -73,8 +65,8 @@ function buildWorkspace(config, selectedFront) {
   const startX = 10000;
   const startY = 9200;
 
-  const orchestrator = team.members[0];
-  const others = team.members.slice(1);
+  const orchestrator = agents.find((a) => a.role === 'orchestrator');
+  const others = agents.filter((a) => a.role !== 'orchestrator');
   const totalWidth = Math.max(1, others.length) * (terminalWidth + hGap) - hGap;
   const orchX = startX + (totalWidth - terminalWidth) / 2;
   const orchY = startY;
@@ -106,37 +98,35 @@ function buildWorkspace(config, selectedFront) {
     }));
   }
 
-  // Create other member terminals in a row below
+  // Create other agent terminals in a row below
   const rowY = orchY + terminalHeight + vGap;
 
-  others.forEach((member, i) => {
+  others.forEach((agent, i) => {
     const x = startX + i * (terminalWidth + hGap);
     const termId = generateUUID();
-    terminalIds[member.slug] = termId;
-
-    const workDir = getWorkingDirectory(config, selectedFront, member);
+    terminalIds[agent.slug] = termId;
 
     nodes.push(createTextLabel(
-      member.name,
-      [x + terminalWidth / 2 - (member.name.length * 7), rowY - labelHeight - 10],
+      agent.name,
+      [x + terminalWidth / 2 - (agent.name.length * 7), rowY - labelHeight - 10],
       now, zIndex++,
     ));
 
     nodes.push(createTerminal({
       terminalId: termId,
       nodeId: generateUUID(),
-      name: member.name,
-      color: member.color || '#8E8E93',
-      workingDirectory: workDir,
-      command: `claude --agent ${member.slug}`,
+      name: agent.name,
+      color: agent.color || '#8E8E93',
+      workingDirectory: config.cwd,
+      command: `claude --agent ${agent.slug}`,
       position: [x, rowY],
       size: [terminalWidth, terminalHeight],
       createdAt: now,
       zIndex: zIndex++,
     }));
 
-    // Connection from orchestrator to this member
-    if (terminalIds[orchestrator?.slug]) {
+    // Connection from orchestrator to this agent
+    if (orchestrator && terminalIds[orchestrator.slug]) {
       connections.push(createConnection(
         terminalIds[orchestrator.slug],
         termId,
@@ -236,22 +226,6 @@ function createConnection(terminalIdA, terminalIdB, pointA, pointB, createdAt) {
     terminalIdA,
     terminalIdB,
   };
-}
-
-/**
- * Determine working directory for a member based on their repoKey
- */
-function getWorkingDirectory(config, selectedFront, member) {
-  if (!member.repoKey || !selectedFront?.repos) return config.cwd;
-
-  const repo = selectedFront.repos.find((r) => r.name === member.repoKey.repoName);
-  if (repo) {
-    const repoPath = repo.localPath || repo.path;
-    if (repoPath.startsWith('/')) return repoPath;
-    return resolve(config.cwd, repoPath);
-  }
-
-  return config.cwd;
 }
 
 function registerInManifest(workspaceId, workspaceName) {

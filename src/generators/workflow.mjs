@@ -1,12 +1,16 @@
 /**
- * Generates .claude/WORKFLOW.md — Team topology and delegation rules
+ * Generates .claude/WORKFLOW.md — Team topology, quality pipeline, and delegation rules
+ *
+ * Uses the new V0 config shape:
+ *   config.agents[] with role field ('orchestrator', 'executor', 'validator', 'monitor')
+ *   config.repos[] flat list (no fronts/selectedFront)
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /**
- * @param {object} config - Configuration from wizard
+ * @param {object} config - Configuration from wizard (V0 shape)
  * @param {object} opts - { dryRun: boolean }
  */
 export async function generateWorkflow(config, opts = {}) {
@@ -24,50 +28,195 @@ export async function generateWorkflow(config, opts = {}) {
 }
 
 function buildWorkflow(config) {
-  const { project, fronts, team } = config;
+  const { project, agents } = config;
 
-  let md = `# Agent Workflow — ${project.name}${config.selectedFront ? ` (${config.selectedFront})` : ''}
+  let md = `# Agent Workflow — ${project.name}
 
-## Team Members
-
-| Member | Agent ID | Maestri Terminal |
-|--------|----------|-----------------|
 `;
 
-  for (const member of team.members) {
-    md += `| ${member.name} | \`${member.slug}\` | ${member.name} |\n`;
+  // ── 1. Agents Table ──────────────────────────────────────────────
+  md += buildAgentsTable(agents);
+
+  // ── 2. Agent Topology ────────────────────────────────────────────
+  md += buildTopology(agents);
+
+  // ── 3. Quality Pipeline ──────────────────────────────────────────
+  md += buildPipeline(agents);
+
+  // ── 4. Delegation Protocol ───────────────────────────────────────
+  md += buildDelegationProtocol(agents);
+
+  // ── 5. Terminal → Repository Mapping ─────────────────────────────
+  md += buildRepoMapping(config);
+
+  return md;
+}
+
+/* ================================================================
+ * Section builders
+ * ================================================================ */
+
+function buildAgentsTable(agents) {
+  let md = `## Agents
+
+| Agent | Slug | Role | Maestri Terminal |
+|-------|------|------|-----------------|
+`;
+
+  for (const agent of agents) {
+    md += `| ${agent.name} | \`${agent.slug}\` | ${agent.role} | ${agent.name} |\n`;
   }
 
   md += `
-## Agent Topology
+---
+
+`;
+  return md;
+}
+
+function buildTopology(agents) {
+  const orchestrator = agents.find((a) => a.role === 'orchestrator');
+  const others = agents.filter((a) => a.role !== 'orchestrator');
+
+  let md = `## Agent Topology
 
 \`\`\`
 `;
 
-  // Draw topology
-  const techLead = team.members[0];
-  const others = team.members.slice(1);
-
-  if (techLead) {
-    md += `  ● ${techLead.name} (orchestrator)\n`;
-    others.forEach((member, i) => {
+  if (orchestrator) {
+    md += `  ● ${orchestrator.name} (${orchestrator.role})\n`;
+    others.forEach((agent, i) => {
       const connector = i === others.length - 1 ? '└' : '├';
-      md += `     ${connector}── ● ${member.name}\n`;
+      md += `     ${connector}── ● ${agent.name} (${agent.role})\n`;
     });
+  } else {
+    // No orchestrator — flat list
+    for (const agent of agents) {
+      md += `  ● ${agent.name} (${agent.role})\n`;
+    }
   }
 
   md += `\`\`\`
 
-## Delegation Protocol
+---
 
-The **${techLead?.name || 'Tech Lead'}** is the orchestrator. All task delegation flows through them.
+`;
+  return md;
+}
+
+function buildPipeline(agents) {
+  // Find agents by role for pipeline references
+  const executor = agents.find((a) => a.role === 'executor');
+  const validator = agents.find((a) => a.role === 'validator');
+  const monitor = agents.find((a) => a.role === 'monitor');
+  const orchestrator = agents.find((a) => a.role === 'orchestrator');
+
+  // Get all validators for the validation phases
+  const validators = agents.filter((a) => a.role === 'validator');
+  const businessValidator = validators.find((a) =>
+    a.slug.includes('biz') || a.slug.includes('business') || a.slug.includes('analyst'),
+  ) || validators[0];
+  const qualityValidator = validators.find((a) =>
+    a.slug.includes('quality') || a.slug.includes('guard') || a.slug.includes('review'),
+  ) || validators[1] || validators[0];
+
+  const executorName = executor?.name || 'Developer';
+  const monitorName = monitor?.name || 'Sentinel';
+  const orchestratorName = orchestrator?.name || 'Tech Lead';
+  const bizValidatorName = businessValidator?.name || 'Business Analyst';
+  const qualityValidatorName = qualityValidator?.name || 'Quality Guard';
+
+  let md = `## Quality Pipeline
+
+The development pipeline follows 8 phases. The **${orchestratorName}** orchestrates this automatically after receiving a task.
+
+### Phase 1 — Implementation
+**Agent**: ${executorName}
+The ${executorName} implements the feature, writes tests, and follows project patterns.
+
+\`\`\`bash
+maestri ask "${executorName}" "Implement [feature]. Context: [full context]. Acceptance criteria: [criteria]."
+\`\`\`
+
+### Phase 2 — Business Rules Validation
+**Agent**: ${bizValidatorName}
+Validates the implementation against business rules and requirements.
+
+\`\`\`bash
+maestri ask "${bizValidatorName}" "Validate the implementation of [feature] against business rules. Check: [specific rules]."
+\`\`\`
+
+### Phase 3 — Quality Review
+**Agent**: ${qualityValidatorName}
+Reviews code quality, test coverage, patterns, security, and token efficiency.
+
+\`\`\`bash
+maestri ask "${qualityValidatorName}" "Review the implementation of [feature]. Check quality, tests, patterns, and security."
+\`\`\`
+
+### Phase 4 — Branch Verification
+**Agent**: ${monitorName}
+Checks the target branch for conflicts. If conflicts exist, ${executorName} resolves them.
+
+\`\`\`bash
+maestri ask "${monitorName}" "Check the target branch for conflicts with the current implementation."
+\`\`\`
+
+### Phase 5 — Commit Approval
+**Actor**: Human
+The human reviews the validation chain results and approves the commit.
+
+> ⏸️ Pipeline pauses here — the ${orchestratorName} presents a summary and waits for human approval.
+
+### Phase 6 — PR + Merge
+**Actor**: Human (on GitHub)
+The human reviews and merges the PR on GitHub.
+
+### Phase 7 — Deploy Monitoring
+**Agent**: ${monitorName}
+Monitors CI/CD pipeline logs. Reports infrastructure errors to human, code errors to ${executorName}.
+
+\`\`\`bash
+maestri ask "${monitorName}" "Monitor the CI/CD pipeline for the latest deployment. Report any failures."
+\`\`\`
+
+### Phase 8 — Promotion
+**Actor**: Human + ${monitorName}
+After human validation in the environment, promotes to next stage (dev → homolog → prod).
+
+---
+
+`;
+  return md;
+}
+
+function buildDelegationProtocol(agents) {
+  const orchestrator = agents.find((a) => a.role === 'orchestrator');
+  const orchestratorName = orchestrator?.name || 'Tech Lead';
+
+  let md = `## Delegation Protocol
+
+The **${orchestratorName}** is the orchestrator. All task delegation flows through them.
 
 ### How to Delegate
 
 Use Maestri's inter-terminal communication:
 
 \`\`\`bash
-maestri ask "<Member Name>" "<Task with full context>"
+maestri ask "<Agent Name>" "<Task with full context>"
+\`\`\`
+
+### Delegation Template
+
+\`\`\`
+Task: [clear description]
+Context: [why this is needed, relevant files, dependencies]
+Acceptance Criteria:
+- [criterion 1]
+- [criterion 2]
+Constraints:
+- [follow existing patterns in X]
+- [use Y library]
 \`\`\`
 
 ### Delegation Rules
@@ -77,54 +226,42 @@ maestri ask "<Member Name>" "<Task with full context>"
 3. **Include acceptance criteria** — what "done" looks like
 4. **Specify constraints** — dependencies, patterns to follow, files to modify
 5. **Wait for completion** — check the agent's response before delegating more
+6. **Follow the pipeline** — phases must be executed in order
 
-## Flow
-
-### New Feature
-1. Orchestrator receives the requirement
-2. Orchestrator breaks it down into tasks per member
-3. Orchestrator delegates to members (in parallel if independent)
-4. Orchestrator reviews all outputs
-5. Orchestrator creates PR
-
-### Bug Fix
-1. Orchestrator analyzes the bug
-2. Orchestrator delegates to the appropriate member
-3. Member fixes and writes regression test
-4. Orchestrator reviews and creates PR
-
-## Maestri Terminals
-
-Each member runs in its own Maestri terminal with:
-- Its own working directory (pointing to the correct repo)
-- Its own agent definition (\`.claude/agents/<slug>.md\`)
-- Access to the shared CLAUDE.md for project context
+---
 
 `;
+  return md;
+}
 
-  // Add repo mapping
-  const selectedFront = config.selectedFront
-    ? fronts.find((f) => f.name === config.selectedFront) || fronts[0]
-    : fronts[0];
+function buildRepoMapping(config) {
+  const { agents, repos } = config;
 
-  if (selectedFront?.repos) {
-    md += `### Terminal → Repository Mapping
+  let md = `## Terminal → Repository Mapping
 
-| Terminal | Working Directory | Agent |
-|----------|------------------|-------|
+All agents work from the project root: \`${config.cwd}\`
+
+| Terminal | Working Directory | Agent Command |
+|----------|------------------|---------------|
 `;
 
-    for (const member of team.members) {
-      let workDir = config.cwd;
-      if (member.repoKey) {
-        const repo = selectedFront.repos.find((r) => r.name === member.repoKey.repoName);
-        if (repo) {
-          workDir = repo.localPath || repo.path;
-        }
-      }
-      md += `| ${member.name} | \`${workDir}\` | \`--agent ${member.slug}\` |\n`;
+  for (const agent of agents) {
+    md += `| ${agent.name} | \`${config.cwd}\` | \`claude --agent ${agent.slug}\` |\n`;
+  }
+
+  if (repos && repos.length > 0) {
+    md += `
+### Available Repositories
+
+| Repository | Path | Stack | Package Manager |
+|-----------|------|-------|-----------------|
+`;
+
+    for (const repo of repos) {
+      md += `| ${repo.name} | \`${repo.path}\` | ${repo.stack} | ${repo.package_manager} |\n`;
     }
   }
 
+  md += '\n';
   return md;
 }

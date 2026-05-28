@@ -43,7 +43,7 @@ export async function generate(config, opts = {}) {
       fn: () => generateWorkflow(config, { dryRun }),
     },
     {
-      label: `.claude/agents/ (${config.team.members.length} agents)`,
+      label: `.claude/agents/ (${config.agents.length} agents)`,
       fn: () => generateAgents(config, { dryRun }),
     },
     {
