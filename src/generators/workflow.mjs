@@ -1,16 +1,20 @@
 /**
- * Generates .claude/WORKFLOW.md — Team topology, quality pipeline, and delegation rules
+ * Generates .claude/WORKFLOW.md — Team topology, quality pipeline, and delegation rules (V1)
  *
- * Uses the new V0 config shape:
- *   config.agents[] with role field ('orchestrator', 'executor', 'validator', 'monitor')
- *   config.repos[] flat list (no fronts/selectedFront)
+ * V1 config shape:
+ *   config.project.name
+ *   config.repo.stack, config.repo.packageManager
+ *   config.agents[] with role field
+ *   config.cwd as the single working directory
+ *
+ * No more config.repos[] flat list
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /**
- * @param {object} config - Configuration from wizard (V0 shape)
+ * @param {object} config - Configuration from wizard (V1 shape)
  * @param {object} opts - { dryRun: boolean }
  */
 export async function generateWorkflow(config, opts = {}) {
@@ -46,8 +50,8 @@ function buildWorkflow(config) {
   // ── 4. Delegation Protocol ───────────────────────────────────────
   md += buildDelegationProtocol(agents);
 
-  // ── 5. Terminal → Repository Mapping ─────────────────────────────
-  md += buildRepoMapping(config);
+  // ── 5. Terminal → Working Directory Mapping ───────────────────────
+  md += buildTerminalMapping(config);
 
   return md;
 }
@@ -90,7 +94,6 @@ function buildTopology(agents) {
       md += `     ${connector}── ● ${agent.name} (${agent.role})\n`;
     });
   } else {
-    // No orchestrator — flat list
     for (const agent of agents) {
       md += `  ● ${agent.name} (${agent.role})\n`;
     }
@@ -107,7 +110,6 @@ function buildTopology(agents) {
 function buildPipeline(agents) {
   // Find agents by role for pipeline references
   const executor = agents.find((a) => a.role === 'executor');
-  const validator = agents.find((a) => a.role === 'validator');
   const monitor = agents.find((a) => a.role === 'monitor');
   const orchestrator = agents.find((a) => a.role === 'orchestrator');
 
@@ -234,10 +236,10 @@ Constraints:
   return md;
 }
 
-function buildRepoMapping(config) {
-  const { agents, repos } = config;
+function buildTerminalMapping(config) {
+  const { agents } = config;
 
-  let md = `## Terminal → Repository Mapping
+  let md = `## Terminal → Working Directory Mapping
 
 All agents work from the project root: \`${config.cwd}\`
 
@@ -247,19 +249,6 @@ All agents work from the project root: \`${config.cwd}\`
 
   for (const agent of agents) {
     md += `| ${agent.name} | \`${config.cwd}\` | \`claude --agent ${agent.slug}\` |\n`;
-  }
-
-  if (repos && repos.length > 0) {
-    md += `
-### Available Repositories
-
-| Repository | Path | Stack | Package Manager |
-|-----------|------|-------|-----------------|
-`;
-
-    for (const repo of repos) {
-      md += `| ${repo.name} | \`${repo.path}\` | ${repo.stack} | ${repo.package_manager} |\n`;
-    }
   }
 
   md += '\n';

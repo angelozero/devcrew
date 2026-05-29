@@ -1,10 +1,11 @@
 /**
- * Generator orchestrator — runs all generators in sequence
+ * Generator orchestrator — runs all generators in sequence (V1)
+ *
+ * V1: No project.yaml generator. Single flow for all users.
  */
 
 import chalk from 'chalk';
 import ora from 'ora';
-import { generateProjectYaml } from './project-yaml.mjs';
 import { generateClaudeMd } from './claude-md.mjs';
 import { generateSettings } from './settings.mjs';
 import { generateWorkflow } from './workflow.mjs';
@@ -19,17 +20,8 @@ import { generateMaestriWorkspace } from './maestri.mjs';
  */
 export async function generate(config, opts = {}) {
   const { dryRun } = opts;
-  const steps = [];
 
-  // Architect mode generates project.yaml
-  if (config.mode === 'architect' || config.mode === 'standalone') {
-    steps.push({
-      label: 'project.yaml',
-      fn: () => generateProjectYaml(config, { dryRun }),
-    });
-  }
-
-  steps.push(
+  const steps = [
     {
       label: 'CLAUDE.md',
       fn: () => generateClaudeMd(config, { dryRun }),
@@ -50,7 +42,7 @@ export async function generate(config, opts = {}) {
       label: 'Maestri workspace',
       fn: () => generateMaestriWorkspace(config, { dryRun }),
     },
-  );
+  ];
 
   console.log(chalk.bold('\n📦 Generating files...\n'));
 
@@ -78,15 +70,9 @@ export async function generate(config, opts = {}) {
     console.log(chalk.green.bold('  ✅ DevCrew setup complete!'));
     console.log('');
     console.log(chalk.dim('  Next steps:'));
-    if (config.mode === 'architect') {
-      console.log(chalk.dim('    1. Review and enrich the generated CLAUDE.md'));
-      console.log(chalk.dim('    2. Commit project.yaml to your repo'));
-      console.log(chalk.dim('    3. Share with your team — they run: devcrew init'));
-      console.log(chalk.dim('    4. Open Maestri to start working with your AI team'));
-    } else {
-      console.log(chalk.dim('    1. Open Maestri to start working with your AI team'));
-      console.log(chalk.dim('    2. Click on the Tech Lead terminal to begin'));
-    }
+    console.log(chalk.dim('    1. Review the generated CLAUDE.md and enrich it if needed'));
+    console.log(chalk.dim('    2. Open Maestri to start working with your AI team'));
+    console.log(chalk.dim('    3. Click on the Tech Lead terminal to begin'));
   }
   console.log('');
 }

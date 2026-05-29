@@ -1,9 +1,14 @@
 /**
- * Generates CLAUDE.md — Project context file for all agents
+ * Generates CLAUDE.md — Project context file for all agents (V1)
  *
- * This is the most important generated file. Every agent reads it
- * to understand the project, stack, conventions, team topology,
- * and the 8-phase quality pipeline.
+ * V1 config shape:
+ *   config.project.name, config.project.description
+ *   config.project.context.confluenceUrl, relatedRepos, manual, files, businessRules, technicalRules
+ *   config.repo.stack, config.repo.packageManager
+ *   config.conventions.*
+ *   config.agents[]
+ *
+ * No more config.repos[] or config.project.organization
  */
 
 import { writeFileSync } from 'node:fs';
@@ -11,7 +16,7 @@ import { resolve } from 'node:path';
 import { processContext } from '../context/confluence.mjs';
 
 /**
- * @param {object} config - Configuration from wizard
+ * @param {object} config - Configuration from wizard (V1 shape)
  * @param {object} opts - { dryRun: boolean }
  */
 export async function generateClaudeMd(config, opts = {}) {
@@ -28,39 +33,33 @@ export async function generateClaudeMd(config, opts = {}) {
 
 /**
  * Build the full CLAUDE.md markdown string.
- *
- * @param {object} config - Wizard config (new V0 shape)
- * @returns {Promise<string>} Markdown content
  */
 async function buildClaudeMd(config) {
-  const { project, repos, conventions, agents } = config;
+  const { project, repo, conventions, agents } = config;
 
   // ── Process context (load files, validate URLs) ──────────────────
   const ctx = project.context
     ? await processContext(project.context, config.cwd)
-    : { confluenceUrl: null, loadedFiles: [], manual: '', businessRules: '', technicalRules: '' };
+    : { confluenceUrl: null, relatedRepos: [], loadedFiles: [], manual: '', businessRules: '', technicalRules: '' };
 
   let md = '';
 
   // ── 1. Project Overview ──────────────────────────────────────────
-  md += buildProjectOverview(project, ctx);
+  md += buildProjectOverview(project, repo, ctx);
 
   // ── 2. Project Context ───────────────────────────────────────────
   md += buildProjectContext(ctx);
 
-  // ── 3. Repository Structure ──────────────────────────────────────
-  md += buildRepositoryStructure(repos);
-
-  // ── 4. Conventions ───────────────────────────────────────────────
+  // ── 3. Conventions ───────────────────────────────────────────────
   md += buildConventions(conventions);
 
-  // ── 5. Agents ────────────────────────────────────────────────────
+  // ── 4. Agents ────────────────────────────────────────────────────
   md += buildAgents(agents);
 
-  // ── 6. Quality Pipeline ──────────────────────────────────────────
+  // ── 5. Quality Pipeline ──────────────────────────────────────────
   md += buildPipeline();
 
-  // ── 7. Delegation Protocol ───────────────────────────────────────
+  // ── 6. Delegation Protocol ───────────────────────────────────────
   md += buildDelegationProtocol();
 
   return md;
@@ -70,18 +69,35 @@ async function buildClaudeMd(config) {
  * Section builders
  * ================================================================ */
 
-function buildProjectOverview(project, ctx) {
+function buildProjectOverview(project, repo, ctx) {
   let md = `# CLAUDE.md
 
 ## Project Overview
 
 - **Project**: ${project.name}
-- **Organization**: ${project.organization}
-- **Description**: ${project.description}
 `;
+
+  if (project.description) {
+    md += `- **Description**: ${project.description}\n`;
+  }
+
+  if (repo?.stack) {
+    md += `- **Stack**: ${repo.stack}\n`;
+  }
+
+  if (repo?.packageManager) {
+    md += `- **Package Manager**: ${repo.packageManager}\n`;
+  }
 
   if (ctx.confluenceUrl) {
     md += `- **Confluence**: ${ctx.confluenceUrl} (use Confluence MCP to access)\n`;
+  }
+
+  if (ctx.relatedRepos && ctx.relatedRepos.length > 0) {
+    md += `- **Related Repos**:\n`;
+    for (const repoUrl of ctx.relatedRepos) {
+      md += `  - ${repoUrl}\n`;
+    }
   }
 
   md += `
@@ -146,30 +162,6 @@ ${file.content}
   if (hasConfluence) {
     md += `> 💡 If a Confluence MCP is configured, agents can access live documentation at:
 > ${ctx.confluenceUrl}
-
-`;
-  }
-
-  md += `---
-
-`;
-  return md;
-}
-
-function buildRepositoryStructure(repos) {
-  if (!repos || repos.length === 0) {
-    return '';
-  }
-
-  let md = `## Repository Structure
-
-`;
-
-  for (const repo of repos) {
-    md += `### ${repo.name} — \`${repo.path}\`
-
-- **Stack**: ${repo.stack}
-- **Package Manager**: ${repo.package_manager}
 
 `;
   }
@@ -279,7 +271,7 @@ Reviews code quality, test coverage, patterns, security, and token efficiency.
 
 ### Phase 4 — Branch Verification
 **Agent**: Sentinel
-Checks the develop branch for conflicts. If conflicts exist, Developer resolves them.
+Checks the target branch for conflicts. If conflicts exist, Developer resolves them.
 
 ### Phase 5 — Commit Approval
 **Actor**: Human

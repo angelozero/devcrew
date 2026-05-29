@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * DevCrew CLI — AI Team Setup for Any Project
+ * DevCrew CLI — AI Team Setup for Any Project (V1)
  *
  * Usage:
- *   devcrew init [--architect] [--dry-run]   Scaffold an AI-powered dev team
- *   devcrew update [--force]                 Update config from project.yaml
- *   devcrew status                           Show current DevCrew configuration
+ *   devcrew init [--dry-run]   Scaffold an AI-powered dev team (auto-detects repo)
+ *   devcrew update [--force]   Re-scan repo and update workspace
+ *   devcrew status             Show current DevCrew configuration
  */
 
 import { createRequire } from 'node:module';
@@ -26,11 +26,10 @@ program
 
 program
   .command('init')
-  .description('Initialize DevCrew in the current project')
-  .option('-a, --architect', 'Run in Architect / Tech Lead mode (pioneer)')
+  .description('Initialize DevCrew in the current project (auto-detects repo info)')
   .option('-d, --dry-run', 'Preview what would be generated without writing files')
   .action(async (opts) => {
-    await init({ architect: opts.architect, dryRun: opts.dryRun });
+    await init({ dryRun: opts.dryRun });
   });
 
 program
@@ -42,7 +41,7 @@ program
 
 program
   .command('update')
-  .description('Update DevCrew configuration from project.yaml (preserves customizations)')
+  .description('Re-scan repo and update DevCrew workspace (preserves agent customizations)')
   .option('-f, --force', 'Overwrite existing agent files (ignores customizations)')
   .action(async (opts) => {
     const { update } = await import('../src/commands/update.mjs');

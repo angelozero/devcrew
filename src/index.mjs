@@ -1,7 +1,7 @@
 /**
- * DevCrew — AI Team Setup for Any Project
+ * DevCrew — Public API (V1)
  *
- * Public API for programmatic usage.
+ * Exports the three CLI commands for programmatic use.
  */
 
 export { init } from './commands/init.mjs';

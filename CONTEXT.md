@@ -416,3 +416,145 @@ These quotes from the project owner were pivotal in shaping design decisions:
 ---
 
 **This document should be read by any AI agent working on this project to understand the full context, decisions, and rationale behind the current implementation.**
+
+---
+
+## Phase 2 — V1 Redesign: "Tool, Not Process"
+
+**Date**: 2026-05
+**Trigger**: First real-world test of DevCrew on the `coffe-shop` project (Node.js + Express + EJS)
+
+### The Problem Discovered
+
+When running `devcrew init --architect` inside an existing project, the wizard asked 20+ questions — most of which were already answered by the repo itself:
+
+- Project name → already in `package.json`
+- Description → already in `package.json` and `README.md`
+- Tech stack → detectable from `package.json` dependencies
+- Package manager → detectable from lock files (`package-lock.json`, `yarn.lock`, etc.)
+- Repo path → it's `process.cwd()`
+- Repo name → it's the directory name or `package.json` name
+
+The user's insight: **"O IntelliJ não pergunta qual time você está ou qual o seu contexto, ele apenas roda seu projeto e dali pra frente você faz o resto."**
+
+### The New Mental Model
+
+DevCrew V1 is a **tool**, not a **team process**.
+
+| V0 (Process) | V1 (Tool) |
+|-------------|-----------|
+| Architect configures → commits project.yaml → Developer consumes | Developer runs `devcrew init` → tool detects → generates |
+| 2 personas (Architect, Developer) | 1 flow for everyone |
+| project.yaml as shared artifact | No shared artifact |
+| 20+ wizard questions | Minimal questions (only what can't be inferred) |
+| `--architect` flag | No flags needed |
+
+### Key Decisions Made in V1
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | **Eliminate project.yaml** | No shared artifact needed — each dev generates their own workspace from the repo |
+| 2 | **Eliminate Architect/Developer personas** | One flow for everyone — the tool detects the context |
+| 3 | **Auto-detect from repo** | `package.json`, `README.md`, `ARCHITECTURE.md`, lock files, git, test files, lint configs |
+| 4 | **Show detected info first** | User confirms or corrects — "convention over configuration" |
+| 5 | **Ask only what can't be inferred** | Commit format, Confluence URL, related repos, business rules, agent customization |
+| 6 | **Add `relatedRepos` to context** | Links to related repos (GitHub, Bitbucket) for agent context |
+| 7 | **Redefine `devcrew update`** | No longer syncs from project.yaml — re-scans the repo and updates workspace |
+| 8 | **Remove `--architect` flag** | Unnecessary — single flow |
+| 9 | **README must answer "where do I run this?"** | First-time user question that was missing from V0 docs |
+| 10 | **README must include example session** | Show exactly what the wizard looks like |
+
+### New Architecture
+
+**New module**: `src/scanner/repo-scanner.mjs`
+- Detects: project name, description, stack, package manager, default branch, tests, coding standards, architecture docs
+- Multi-language: Node.js, Java (Maven/Gradle), Python, Rust, Go
+- Returns structured object with all detected values
+
+**Removed**: `src/wizard/architect.mjs`, `src/wizard/developer.mjs`
+**Created**: `src/wizard/init-wizard.mjs` — single unified wizard
+
+**Removed**: `src/generators/project-yaml.mjs`
+**Modified**: All generators adapted to new V1 config shape (no `repos[]`, no `organization`)
+
+### New Config Object (V1)
+
+```javascript
+{
+  cwd: string,
+  project: {
+    name: string,
+    description: string,
+    context: {
+      confluenceUrl: string | null,
+      relatedRepos: string[],        // NEW in V1
+      manual: string,
+      files: string[],
+      businessRules: string,
+      technicalRules: string
+    }
+  },
+  repo: {                            // singular (was repos[])
+    stack: string,
+    packageManager: string | null,
+    hasTests: boolean,
+    testFramework: string | null,
+    detectedStandards: string[]
+  },
+  conventions: {
+    defaultBranch: string,
+    commitFormat: string,
+    codingStandards: string[],
+    testStrategy: string
+  },
+  agents: [{ name, slug, description, role, color }]
+}
+```
+
+### Quotes That Drove V1 Decisions
+
+1. > *"O IntelliJ não pergunta qual time você está ou qual o seu contexto, ele apenas roda seu projeto e dali pra frente você faz o resto"*
+   — Led to the "Tool, not Process" mental model
+
+2. > *"Essa info já está na documentação do projeto, seja em um readme, ou no próprio nome do repo"*
+   — Led to auto-detection from package.json, README.md, ARCHITECTURE.md
+
+3. > *"Já estamos no repositório do próprio projeto, não faz sentido"*
+   — Led to elimination of Round 2 (Repositories) entirely
+
+4. > *"Aqui eu não deveria informar isso tendo em vista que esse projeto já existe"*
+   — Led to stack/package manager auto-detection from lock files and package.json
+
+5. > *"Aqui seria legal colocar o link ou os links dos projetos seja de um Bitbucket seja de um GitHub"*
+   — Led to addition of `relatedRepos` field in context
+
+### Files Changed in V1
+
+| Action | File |
+|--------|------|
+| CREATE | `src/scanner/repo-scanner.mjs` |
+| CREATE | `src/wizard/init-wizard.mjs` |
+| REMOVE (logical) | `src/wizard/architect.mjs` (kept on disk, no longer used) |
+| REMOVE (logical) | `src/wizard/developer.mjs` (kept on disk, no longer used) |
+| REMOVE (logical) | `src/generators/project-yaml.mjs` (kept on disk, no longer used) |
+| MODIFY | `src/commands/init.mjs` |
+| MODIFY | `src/commands/update.mjs` |
+| MODIFY | `src/commands/status.mjs` |
+| MODIFY | `src/generators/index.mjs` |
+| MODIFY | `src/generators/claude-md.mjs` |
+| MODIFY | `src/generators/workflow.mjs` |
+| MODIFY | `src/generators/agents.mjs` |
+| MODIFY | `src/context/confluence.mjs` |
+| MODIFY | `bin/devcrew.mjs` |
+| MODIFY | `src/index.mjs` |
+| REWRITE | `README.md` |
+| REWRITE | `README.pt-BR.md` |
+
+### Pilot Project
+
+The V1 redesign was validated against the `coffe-shop` project:
+- **Stack**: Node.js + Express + EJS
+- **Package manager**: npm (detected from `package-lock.json`)
+- **Description**: detected from `package.json` → `"A simple coffee shop CRUD application with Node.js, Express, and EJS"`
+- **Architecture**: `ARCHITECTURE.md` present with full documentation
+- **Tests**: none (correctly detected as `hasTests: false`)

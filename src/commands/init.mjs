@@ -1,19 +1,18 @@
 /**
- * devcrew init — Main entry point for project setup
+ * devcrew init — Main entry point for project setup (V1)
  *
- * Routes to architect mode (--architect) or developer mode (default).
- * If project.yaml exists and no --architect flag, uses developer mode.
- * If no project.yaml and no --architect flag, falls back to standalone wizard.
+ * V1 model: "Tool, not process"
+ * - Scans the repo automatically (no more Architect/Developer personas)
+ * - Presents detected info to the user
+ * - Asks only what cannot be inferred
+ * - Generates the full workspace in one pass
  *
- * V0 model: 1 workspace template with 5 default AI agents.
- * Config uses repos[] (flat), agents[] (with roles), and project.context.
+ * No project.yaml. No --architect flag. Just: devcrew init
  */
 
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import chalk from 'chalk';
-import { architectWizard } from '../wizard/architect.mjs';
-import { developerWizard } from '../wizard/developer.mjs';
+import { scanRepo } from '../scanner/repo-scanner.mjs';
+import { initWizard } from '../wizard/init-wizard.mjs';
 import { generate } from '../generators/index.mjs';
 
 const BANNER = `
@@ -24,31 +23,20 @@ export async function init(options = {}) {
   console.log(BANNER);
 
   const cwd = process.cwd();
-  const projectYamlPath = resolve(cwd, 'project.yaml');
-  const hasProjectYaml = existsSync(projectYamlPath);
 
-  let config;
+  // ── 1. Scan the repo ──────────────────────────────────────────────
+  console.log(chalk.dim('  Scanning your repository...\n'));
+  const detected = await scanRepo(cwd);
 
-  if (options.architect) {
-    // Architect / Tech Lead mode — pioneer mode
-    console.log(chalk.yellow('🏗️  Architect Mode') + ' — Define project structure, agents, and generate project.yaml\n');
-    config = await architectWizard(cwd);
-  } else if (hasProjectYaml) {
-    // Developer mode — project.yaml exists
-    console.log(chalk.green('👨‍💻 Developer Mode') + ' — Found project.yaml, loading configuration...\n');
-    config = await developerWizard(cwd, projectYamlPath);
-  } else {
-    // Standalone mode — no project.yaml, no --architect
-    console.log(chalk.blue('📦 Standalone Mode') + ' — No project.yaml found, starting interactive setup...\n');
-    config = await architectWizard(cwd, { standalone: true });
-  }
+  // ── 2. Run the wizard (minimal questions) ─────────────────────────
+  const config = await initWizard(cwd, detected);
 
   if (!config) {
     console.log(chalk.red('\n✖ Setup cancelled.'));
     return;
   }
 
-  // Generate all files
+  // ── 3. Generate all files ─────────────────────────────────────────
   if (options.dryRun) {
     console.log(chalk.yellow('\n🔍 Dry run — showing what would be generated:\n'));
     await generate(config, { dryRun: true });

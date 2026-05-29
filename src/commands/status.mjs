@@ -1,8 +1,10 @@
 /**
- * devcrew status — Show current DevCrew configuration
+ * devcrew status — Show current DevCrew configuration (V1)
+ *
+ * V1: No project.yaml check. Reports on generated workspace files only.
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import chalk from 'chalk';
 
@@ -10,14 +12,6 @@ export async function status() {
   const cwd = process.cwd();
 
   console.log(chalk.bold.cyan('\n🚀 DevCrew Status\n'));
-
-  // Check project.yaml
-  const projectYamlPath = resolve(cwd, 'project.yaml');
-  if (existsSync(projectYamlPath)) {
-    console.log(chalk.green('  ✔ project.yaml') + chalk.dim(' — project configuration found'));
-  } else {
-    console.log(chalk.dim('  ○ project.yaml — not found'));
-  }
 
   // Check CLAUDE.md
   const claudeMdPath = resolve(cwd, 'CLAUDE.md');
@@ -47,25 +41,28 @@ export async function status() {
   const agentsDir = resolve(cwd, '.claude', 'agents');
   if (existsSync(agentsDir)) {
     const agents = readdirSync(agentsDir).filter((f) => f.endsWith('.md'));
-    console.log(chalk.green(`  ✔ .claude/agents/`) + chalk.dim(` — ${agents.length} agents: ${agents.map((a) => a.replace('.md', '')).join(', ')}`));
+    console.log(
+      chalk.green(`  ✔ .claude/agents/`) +
+      chalk.dim(` — ${agents.length} agents: ${agents.map((a) => a.replace('.md', '')).join(', ')}`),
+    );
   } else {
     console.log(chalk.dim('  ○ .claude/agents/ — not found'));
   }
 
   // Summary
-  const hasAll = existsSync(claudeMdPath) && existsSync(settingsPath) && existsSync(workflowPath) && existsSync(agentsDir);
+  const hasAll =
+    existsSync(claudeMdPath) &&
+    existsSync(settingsPath) &&
+    existsSync(workflowPath) &&
+    existsSync(agentsDir);
 
   console.log('');
   if (hasAll) {
     console.log(chalk.green.bold('  ✅ DevCrew is fully configured!'));
     console.log(chalk.dim('  Open Maestri to start working with your AI team.'));
-  } else if (existsSync(projectYamlPath)) {
-    console.log(chalk.yellow('  ⚠ project.yaml found but setup incomplete.'));
-    console.log(chalk.dim('  Run: devcrew init'));
   } else {
     console.log(chalk.yellow('  ⚠ DevCrew is not configured in this directory.'));
-    console.log(chalk.dim('  Run: devcrew init --architect  (to create from scratch)'));
-    console.log(chalk.dim('  Run: devcrew init              (if project.yaml exists)'));
+    console.log(chalk.dim('  Run: devcrew init'));
   }
   console.log('');
 }

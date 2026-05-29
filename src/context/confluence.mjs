@@ -1,16 +1,13 @@
 /**
- * Confluence Context Extractor
+ * Context Processor (V1)
  *
- * For V0, this module provides a structured way to:
- * 1. Detect if Confluence MCP is available (check if configured in settings)
- * 2. Store the Confluence URL for agents to use at runtime
- * 3. Allow manual content to be loaded from .md files
+ * Processes project context from the wizard config:
+ * - Validates Confluence URL (stored for runtime MCP use)
+ * - Loads local .md files specified by the user
+ * - Passes through relatedRepos, manual text, business rules, technical rules
  *
  * The actual Confluence extraction happens at RUNTIME when agents use the MCP,
- * not at setup time. What we do here is:
- * - Validate the URL
- * - Load any local .md files the user provided
- * - Structure everything for the CLAUDE.md generator
+ * not at setup time.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -20,13 +17,14 @@ import { resolve } from 'node:path';
  * Process project context from the wizard config.
  * Loads .md files, validates URLs, structures content.
  *
- * @param {object} context - The project.context from wizard
+ * @param {object} context - The project.context from wizard (V1 shape)
  * @param {string} cwd - Current working directory
  * @returns {object} Enriched context
  */
 export async function processContext(context, cwd) {
   const result = {
     confluenceUrl: context.confluenceUrl || null,
+    relatedRepos: context.relatedRepos || [],
     loadedFiles: [],
     manual: context.manual || '',
     businessRules: context.businessRules || '',

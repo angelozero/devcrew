@@ -1,13 +1,15 @@
 /**
- * Generates .claude/agents/ — Creates agent definition files
+ * Generates .claude/agents/ — Creates agent definition files (V1)
  *
- * Uses the new V0 config shape:
- *   config.agents[] with role field ('orchestrator', 'executor', 'validator', 'monitor')
- *   Flat structure: .claude/agents/<slug>.md (no subdirectories)
+ * V1 config shape:
+ *   config.project.name (no organization)
+ *   config.repo.stack, config.repo.packageManager
+ *   config.conventions.*
+ *   config.agents[] with role field
  *
  * For each agent:
  *   1. Check if a pre-built template exists in src/templates/agents/<slug>.md
- *   2. If yes, use it (replace {{project_name}}, {{organization}})
+ *   2. If yes, use it (replace {{project_name}})
  *   3. If no, generate dynamically using generateDynamicAgent()
  */
 
@@ -20,7 +22,7 @@ const __dirname = dirname(__filename);
 const TEMPLATES_DIR = resolve(__dirname, '..', 'templates', 'agents');
 
 /**
- * @param {object} config - Configuration from wizard (V0 shape)
+ * @param {object} config - Configuration from wizard (V1 shape)
  * @param {object} opts - { dryRun: boolean }
  */
 export async function generateAgents(config, opts = {}) {
@@ -43,9 +45,9 @@ export async function generateAgents(config, opts = {}) {
 
     if (existsSync(templatePath)) {
       content = readFileSync(templatePath, 'utf-8');
-      // Replace template variables
+      // Replace template variables (V1: no {{organization}})
       content = content.replace(/\{\{project_name\}\}/g, config.project.name);
-      content = content.replace(/\{\{organization\}\}/g, config.project.organization);
+      content = content.replace(/\{\{organization\}\}/g, ''); // graceful fallback
     } else {
       // Generate a dynamic agent based on the agent definition and role
       content = generateDynamicAgent(agent, config);
@@ -77,7 +79,7 @@ model: sonnet
 
 # ${agent.name}
 
-You are the **${agent.name}** for the project **${project.name}** (${project.organization}).
+You are the **${agent.name}** for the project **${project.name}**.
 
 **Your role**: ${agent.description}
 

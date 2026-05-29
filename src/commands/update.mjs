@@ -1,23 +1,23 @@
 /**
- * devcrew update — Update DevCrew configuration from project.yaml
+ * devcrew update — Re-scan repo and update DevCrew workspace (V1)
  *
- * Reads the latest project.yaml and updates generated files
- * without destroying user customizations.
+ * V1 model: No project.yaml. Re-scans the repo to detect changes,
+ * then selectively updates generated files.
  *
  * Behavior:
- *   - CLAUDE.md          → always regenerated (source of truth)
+ *   - CLAUDE.md          → always regenerated
  *   - .claude/WORKFLOW.md → always regenerated
  *   - .claude/settings.json → only created if missing
  *   - .claude/agents/     → smart merge (new agents added, existing preserved)
- *   - Maestri workspace   → updated with new agents
+ *   - Maestri workspace   → updated with current agent list
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
-import yaml from 'js-yaml';
+import { scanRepo } from '../scanner/repo-scanner.mjs';
 import { generateClaudeMd } from '../generators/claude-md.mjs';
 import { generateSettings } from '../generators/settings.mjs';
 import { generateWorkflow } from '../generators/workflow.mjs';
@@ -32,35 +32,26 @@ import { generateMaestriWorkspace } from '../generators/maestri.mjs';
  */
 export async function update(options = {}) {
   const cwd = process.cwd();
-  const projectYamlPath = resolve(cwd, 'project.yaml');
 
   console.log(chalk.bold.cyan('\n🔄 DevCrew Update\n'));
 
-  // ── 1. Check project.yaml exists ──────────────────────────────────
-  if (!existsSync(projectYamlPath)) {
-    console.log(chalk.red('  ✖ No project.yaml found in current directory.'));
-    console.log(chalk.dim('  Run: devcrew init --architect  (to create from scratch)'));
+  // ── 1. Check DevCrew is initialized ──────────────────────────────
+  const claudeMdPath = resolve(cwd, 'CLAUDE.md');
+  if (!existsSync(claudeMdPath)) {
+    console.log(chalk.red('  ✖ DevCrew is not initialized in this directory.'));
+    console.log(chalk.dim('  Run: devcrew init'));
     return;
   }
 
-  // ── 2. Read project.yaml ──────────────────────────────────────────
-  let projectConfig;
-  try {
-    const raw = readFileSync(projectYamlPath, 'utf-8');
-    projectConfig = yaml.load(raw);
-  } catch (err) {
-    console.log(chalk.red(`  ✖ Failed to read project.yaml: ${err.message}`));
-    return;
-  }
+  // ── 2. Re-scan the repo ───────────────────────────────────────────
+  console.log(chalk.dim('  Re-scanning your repository...\n'));
+  const detected = await scanRepo(cwd);
 
   // ── 3. Detect current state ───────────────────────────────────────
   const state = detectCurrentState(cwd);
 
-  // ── 4. Build config from project.yaml ─────────────────────────────
-  const config = buildConfigFromYaml(projectConfig, cwd);
-
-  // ── 5. Show current state ─────────────────────────────────────────
-  console.log(chalk.bold('  Current state:\n'));
+  // ── 4. Show current state ─────────────────────────────────────────
+  console.log(chalk.bold('  Current workspace state:\n'));
   console.log(`    CLAUDE.md:             ${state.hasClaudeMd ? chalk.green('✔ exists') : chalk.dim('○ missing')}`);
   console.log(`    .claude/settings.json: ${state.hasSettings ? chalk.green('✔ exists') : chalk.dim('○ missing')}`);
   console.log(`    .claude/WORKFLOW.md:   ${state.hasWorkflow ? chalk.green('✔ exists') : chalk.dim('○ missing')}`);
@@ -70,13 +61,14 @@ export async function update(options = {}) {
     console.log(chalk.dim(`      ${state.existingAgents.join(', ')}`));
   }
 
-  // ── 6. Calculate changes ──────────────────────────────────────────
-  const newAgents = config.agents.filter(a => !state.existingAgents.includes(a.slug));
-  const existingAgents = config.agents.filter(a => state.existingAgents.includes(a.slug));
-  const customAgents = state.existingAgents.filter(
-    slug => !config.agents.find(a => a.slug === slug),
-  );
+  // ── 5. Show what was detected ─────────────────────────────────────
+  console.log(chalk.bold('\n  Re-scan results:\n'));
+  if (detected.name) console.log(`    Project:       ${detected.name}`);
+  if (detected.stack) console.log(`    Stack:         ${detected.stack}`);
+  if (detected.packageManager) console.log(`    Pkg manager:   ${detected.packageManager}`);
+  if (detected.defaultBranch) console.log(`    Branch:        ${detected.defaultBranch}`);
 
+  // ── 6. Show changes to apply ──────────────────────────────────────
   console.log(chalk.bold('\n  Changes to apply:\n'));
   console.log(`    ${chalk.cyan('↻')} CLAUDE.md — will be regenerated`);
   console.log(`    ${chalk.cyan('↻')} .claude/WORKFLOW.md — will be regenerated`);
@@ -87,27 +79,17 @@ export async function update(options = {}) {
     console.log(`    ${chalk.dim('=')} .claude/settings.json — preserved (already exists)`);
   }
 
-  if (newAgents.length > 0) {
-    for (const agent of newAgents) {
-      console.log(`    ${chalk.green('+')} .claude/agents/${agent.slug}.md — new agent`);
-    }
-  }
-
-  if (existingAgents.length > 0) {
-    for (const agent of existingAgents) {
+  if (state.existingAgents.length > 0) {
+    for (const slug of state.existingAgents) {
       if (options.force) {
-        console.log(`    ${chalk.yellow('↻')} .claude/agents/${agent.slug}.md — will be overwritten (--force)`);
+        console.log(`    ${chalk.yellow('↻')} .claude/agents/${slug}.md — will be overwritten (--force)`);
       } else {
-        console.log(`    ${chalk.dim('=')} .claude/agents/${agent.slug}.md — preserved (customizations kept)`);
+        console.log(`    ${chalk.dim('=')} .claude/agents/${slug}.md — preserved (customizations kept)`);
       }
     }
   }
 
-  if (customAgents.length > 0) {
-    for (const slug of customAgents) {
-      console.log(`    ${chalk.blue('⊕')} .claude/agents/${slug}.md — user-created (preserved)`);
-    }
-  }
+  console.log(`    ${chalk.cyan('↻')} Maestri workspace — will be updated`);
 
   // ── 7. Confirm ────────────────────────────────────────────────────
   const { proceed } = await inquirer.prompt([
@@ -124,8 +106,13 @@ export async function update(options = {}) {
     return;
   }
 
-  // ── 8. Apply changes ─────────────────────────────────────────────
-  await generateUpdate(config, {
+  // ── 8. Build a minimal config from detected info ──────────────────
+  // We need a config object for the generators. Since there's no project.yaml,
+  // we reconstruct from what's on disk + what was detected.
+  const config = await buildConfigFromDisk(cwd, detected, state);
+
+  // ── 9. Apply changes ──────────────────────────────────────────────
+  await applyUpdate(config, {
     force: options.force || false,
     existingAgents: state.existingAgents,
     hasSettings: state.hasSettings,
@@ -136,9 +123,6 @@ export async function update(options = {}) {
 
 /**
  * Detect what DevCrew files already exist in the workspace.
- *
- * @param {string} cwd - Current working directory
- * @returns {{ hasClaudeMd: boolean, hasSettings: boolean, hasWorkflow: boolean, existingAgents: string[] }}
  */
 function detectCurrentState(cwd) {
   const claudeDir = resolve(cwd, '.claude');
@@ -150,64 +134,63 @@ function detectCurrentState(cwd) {
     hasWorkflow: existsSync(resolve(claudeDir, 'WORKFLOW.md')),
     existingAgents: existsSync(agentsDir)
       ? readdirSync(agentsDir)
-          .filter(f => f.endsWith('.md'))
-          .map(f => f.replace('.md', ''))
+          .filter((f) => f.endsWith('.md'))
+          .map((f) => f.replace('.md', ''))
       : [],
   };
 }
 
 /**
- * Transform project.yaml structure into the internal config format
- * expected by all generators.
- *
- * @param {object} projectConfig - Parsed project.yaml content
- * @param {string} cwd - Current working directory
- * @returns {object} Internal config object
+ * Build a config object from what's on disk + detected info.
+ * Reads agent slugs from .claude/agents/ to reconstruct the agents list.
  */
-function buildConfigFromYaml(projectConfig, cwd) {
+async function buildConfigFromDisk(cwd, detected, state) {
+  // Reconstruct agents from existing agent files
+  const agents = state.existingAgents.map((slug) => ({
+    name: slugToName(slug),
+    slug,
+    description: '',
+    role: inferRole(slug),
+    color: inferColor(slug),
+  }));
+
   return {
-    mode: 'update',
     cwd,
     project: {
-      name: projectConfig.project.name,
-      organization: projectConfig.project.organization,
-      description: projectConfig.project.description,
-      context: projectConfig.project.context || {
+      name: detected.name || 'Unknown Project',
+      description: detected.description || '',
+      context: {
         confluenceUrl: null,
-        extracted: [],
+        relatedRepos: [],
         manual: '',
         files: [],
         businessRules: '',
         technicalRules: '',
       },
     },
-    repos: projectConfig.repos || [],
-    conventions: {
-      defaultBranch: projectConfig.conventions?.default_branch || 'develop',
-      commitFormat: projectConfig.conventions?.commit_format || 'conventional',
-      codingStandards: projectConfig.conventions?.coding_standards || [],
-      testStrategy: projectConfig.conventions?.test_strategy || 'unit + integration',
+    repo: {
+      stack: detected.stack || '',
+      packageManager: detected.packageManager || null,
+      hasTests: detected.hasTests,
+      testFramework: detected.testFramework,
+      detectedStandards: detected.detectedStandards,
     },
-    agents: (projectConfig.agents || []).map(a => ({
-      name: a.name,
-      slug: a.slug,
-      description: a.description,
-      role: a.role || 'executor',
-      color: a.color || '#8E8E93',
-    })),
+    conventions: {
+      defaultBranch: detected.defaultBranch || 'main',
+      commitFormat: 'conventional',
+      codingStandards: detected.detectedStandards,
+      testStrategy: detected.hasTests
+        ? (detected.testFramework ? `${detected.testFramework} — unit + integration` : 'unit + integration')
+        : 'unit + integration',
+    },
+    agents,
   };
 }
 
 /**
  * Run generators selectively based on what needs updating.
- *
- * @param {object} config - Internal config object
- * @param {object} opts
- * @param {boolean} opts.force - Overwrite existing agent files
- * @param {string[]} opts.existingAgents - Slugs of agents already on disk
- * @param {boolean} opts.hasSettings - Whether settings.json already exists
  */
-async function generateUpdate(config, opts) {
+async function applyUpdate(config, opts) {
   const spinner = ora({ prefixText: '  ' });
 
   // Always regenerate CLAUDE.md
@@ -227,10 +210,14 @@ async function generateUpdate(config, opts) {
     spinner.succeed('.claude/settings.json created');
   }
 
-  // Agents — smart merge
-  spinner.start('Updating agents');
-  await generateAgentsSelective(config, opts);
-  spinner.succeed('Agents updated');
+  // Agents — smart merge (only regenerate if --force)
+  if (opts.force) {
+    spinner.start('Regenerating agents (--force)');
+    await generateAgents(config);
+    spinner.succeed('Agents regenerated');
+  } else {
+    spinner.info(chalk.dim('Agents preserved (use --force to overwrite)'));
+  }
 
   // Maestri — update workspace
   spinner.start('Updating Maestri workspace');
@@ -242,33 +229,32 @@ async function generateUpdate(config, opts) {
   console.log('');
 }
 
-/**
- * Generate only new agents (unless --force overwrites all).
- *
- * - force=true  → regenerate every agent defined in project.yaml
- * - force=false → only generate agents whose slug doesn't exist on disk
- * - User-created agents (on disk but not in project.yaml) are never touched
- *
- * @param {object} config - Internal config object
- * @param {object} opts
- * @param {boolean} opts.force
- * @param {string[]} opts.existingAgents
- */
-async function generateAgentsSelective(config, opts) {
-  if (opts.force) {
-    // Force mode: regenerate all agents from project.yaml
-    await generateAgents(config);
-    return;
-  }
+/* ================================================================
+ * Slug → metadata helpers (for reconstructing agents from disk)
+ * ================================================================ */
 
-  // Selective mode: only generate agents that don't exist yet
-  const newAgents = config.agents.filter(a => !opts.existingAgents.includes(a.slug));
+function slugToName(slug) {
+  return slug
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
 
-  if (newAgents.length === 0) {
-    return; // Nothing new to generate
-  }
+function inferRole(slug) {
+  if (slug.includes('lead') || slug.includes('orchestrat')) return 'orchestrator';
+  if (slug.includes('dev') || slug.includes('implement') || slug.includes('engineer')) return 'executor';
+  if (slug.includes('guard') || slug.includes('quality') || slug.includes('analyst') || slug.includes('biz') || slug.includes('review')) return 'validator';
+  if (slug.includes('sentinel') || slug.includes('monitor') || slug.includes('watch')) return 'monitor';
+  return 'executor';
+}
 
-  // Create a modified config with only new agents
-  const newConfig = { ...config, agents: newAgents };
-  await generateAgents(newConfig);
+function inferColor(slug) {
+  const colorMap = {
+    'tech-lead': '#AF52DE',
+    'developer': '#34C759',
+    'biz-analyst': '#007AFF',
+    'quality-guard': '#FF9500',
+    'sentinel': '#FF3B30',
+  };
+  return colorMap[slug] || '#8E8E93';
 }
