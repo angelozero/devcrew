@@ -27,6 +27,13 @@ export async function generateSettings(config, opts = {}) {
         'TodoWrite(*)',
       ],
     },
+    // Disable plugins that conflict with Maestri-based agent delegation.
+    // The superpowers plugin's "subagent-driven-development" skill overrides
+    // the Tech Lead's pipeline by using Claude Code's Task tool instead of
+    // Maestri's inter-terminal communication (maestri ask).
+    enabledPlugins: {
+      'superpowers@claude-plugins-official': false,
+    },
   };
 
   if (opts.dryRun) {

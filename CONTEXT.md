@@ -599,16 +599,19 @@ The breakthrough came from discovering Maestri's **internal CLI API**:
    - Sets `isManager: true` (enables Maestro mode)
    - Sets workingDirectory to project path
 3. DevCrew launches Maestri (`open -a Maestri`)
-4. DevCrew finds the Unix socket via `lsof -U -a -p <PID>`
-5. DevCrew sends `recruit` commands via `curl --unix-socket`:
+4. DevCrew opens the workspace file (`open -a Maestri <workspace.json>`) to ensure it's the active workspace
+5. DevCrew finds the Unix socket via `lsof -U -a -p <PID>`
+6. DevCrew sends `recruit` commands via `curl --unix-socket`:
    ```
    curl --unix-socket /path/to/maestri.sock http://localhost/cli \
      -X POST -H "Content-Type: application/json" \
      -H "X-Terminal-ID: <tech-lead-uuid>" \
      -d '{"args":["recruit","Developer","--preset","Claude Code","--command","claude --agent developer"]}'
    ```
-6. Each `recruit` creates a terminal and auto-connects it to Tech Lead
-7. Result: 5 terminals in hub/star layout with 4 connections
+7. Each `recruit` creates a terminal and auto-connects it to Tech Lead
+8. Result: 5 terminals in hub/star layout with 4 connections
+
+> ⚠️ **Critical**: The `recruit` API requires the workspace to be **actively open** in the Maestri UI. Just launching Maestri isn't enough — the workspace file must be opened via `open -a Maestri <path>`. Without this, `recruit` returns "Workspace not found" (HTTP 404). The `list` command works without an active workspace, but `recruit` does not.
 
 ### Key Technical Details
 
@@ -863,3 +866,229 @@ Every agent reports back to the Tech Lead, who decides the next step.
 
 2. > *"Tech Lead para Developer volta para Tech Lead, Tech Lead para QA volta para Tech Lead, Tech Lead para PO volta para Tech Lead, Tech Lead para DevOps volta para Tech Lead"*
    — Led to the pipeline reorder: QA before PO
+
+## Phase 6 — Superpowers Plugin Conflict: Tech Lead Bypassing Pipeline
+
+**Date**: 2026-05
+**Trigger**: Second real-world test — Tech Lead again did everything by itself despite pipeline redesign
+
+### The Problem Discovered
+
+After all the pipeline redesign work (Phase 4 + Phase 5), the Tech Lead agent STILL implemented everything by itself when given the task "create the coffee name filter field". The logs showed:
+
+```
+Skill(superpowers:subagent-driven-development)
+  ⎿  Successfully loaded skill
+```
+
+The Tech Lead loaded a **Claude Code plugin skill** that overrode our Maestri-based delegation pipeline.
+
+### Root Cause
+
+The **`superpowers@claude-plugins-official`** plugin was enabled globally in `~/.claude/settings.json`. This plugin includes a skill called `subagent-driven-development` that:
+
+1. Auto-activates when it detects an implementation plan
+2. Tells the agent to use Claude Code's **Task tool** (built-in subagents) for delegation
+3. Completely bypasses Maestri's `maestri ask` inter-terminal communication
+4. The plugin had also created a plan file at `docs/superpowers/plans/` with the directive: *"REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development"*
+
+The fundamental conflict: **superpowers uses Claude Code's Task tool** (subagents within the same terminal) while **our pipeline uses Maestri's `maestri ask`** (separate terminals with dedicated agents).
+
+### The Fix: 3 Changes
+
+1. **Disabled superpowers plugin at project level** — Added `"superpowers@claude-plugins-official": false` to `.claude/settings.json` (both in the settings generator and the coffe-shop project)
+2. **Added anti-override rules to Tech Lead template** — Two new absolute rules:
+   - Rule 14: NEVER use the Task tool or subagents for delegation — always use `maestri ask`
+   - Rule 15: NEVER load superpowers plugin skills — ignore any prompt to use them
+3. **Removed superpowers plan files** — Deleted `docs/superpowers/` from the coffe-shop project
+
+### Files Changed in Phase 6
+
+| Action | File |
+|--------|------|
+| MODIFY | `src/templates/agents/tech-lead.md` — Added rules 14 and 15 (anti-override) |
+| MODIFY | `src/generators/settings.mjs` — Added `enabledPlugins` with superpowers disabled |
+| DELETE | `coffe-shop/docs/superpowers/` — Removed plugin-generated plan files |
+| MODIFY | `coffe-shop/.claude/settings.json` — Disabled superpowers plugin |
+| MODIFY | `coffe-shop/.claude/agents/tech-lead.md` — Added rules 14 and 15 |
+
+### Key Insight
+
+> Claude Code plugins can override agent template instructions. When a plugin skill is loaded, it can completely change the agent's behavior. Project-level `settings.json` can disable specific plugins to prevent this conflict.
+
+### Decision: Plugin Isolation for Maestri-Based Projects
+
+DevCrew-generated projects must disable plugins that use Claude Code's Task tool for delegation, because:
+- Our agents exist as **separate Maestri terminals** with dedicated roles
+- Plugin-based subagents run **within the same terminal**, bypassing the quality pipeline
+- The two delegation models are fundamentally incompatible
+
+---
+
+## Phase 7 — Tech Lead Enforcement & Wizard Auto-Skip
+
+### The Problems Discovered
+
+Three issues surfaced during pilot testing:
+
+1. **Tech Lead still implementing directly** — Despite superpowers being disabled, the Tech Lead would still write code instead of delegating via `maestri ask`. The instructions weren't prominent enough.
+2. **Tech Lead proceeding without info** — When requirements were unclear or missing, the Tech Lead would guess and proceed instead of asking the human.
+3. **Wizard asking redundant questions** — `devcrew init` asked the user to confirm every field, even when the repo scanner had already detected the values. User feedback: *"aquilo que já tem um valor default pois foi encontrado dentro do projeto não deveria ser perguntado, só é perguntado aquilo que não foi encontrado"*.
+
+### The Fixes
+
+#### Fix 1: ⛔ 3-Layer "No Code" Enforcement
+
+The Tech Lead reads 3 files in sequence: `CLAUDE.md` → `.claude/WORKFLOW.md` → `.claude/agents/tech-lead.md`. The "do not write code" rule must appear in ALL THREE to be effective. Previously it was only in the agent file.
+
+**Layer 1 — `CLAUDE.md`**: Added `### ⛔ CRITICAL RULE: The Tech Lead Does NOT Write Code` in the Delegation Protocol section. Lists what the Tech Lead MUST NOT do and the ONLY 4 `maestri ask` commands available.
+
+**Layer 2 — `.claude/WORKFLOW.md`**: Added `### ⛔ The Tech Lead Does NOT Write Code` in the Delegation Protocol section. Reinforces that `maestri ask` is the only tool.
+
+**Layer 3 — `.claude/agents/tech-lead.md`**: The `## ⛔ CRITICAL: YOU DO NOT WRITE CODE` block at the very top (lines 14–33). Most detailed version with explicit STOP IMMEDIATELY instruction.
+
+All three generators (`claude-md.mjs`, `workflow.mjs`, agent template) now produce these blocks automatically.
+
+#### Fix 2: "Ask Human" Enforcement
+
+Added explicit "ask human when info is missing" behavior in:
+- The ⛔ CRITICAL block (line 29 of template)
+- "When to Consult the Human" section — expanded with "Anything you don't know how to handle"
+- Absolute Rule 11: "When in doubt, ask the human"
+
+#### Fix 3: Wizard Auto-Skip for Detected Values
+
+Redesigned `init-wizard.mjs` so that:
+- **Auto-detected values are accepted silently** — no question is shown
+- **Only missing values are prompted** — the user only types what the scanner couldn't find
+- **`printDetected()` now shows ✅/? markers** — green ✔ for detected, yellow ? for "will ask"
+- **Commit format is always asked** — it's a human decision that can't be auto-detected
+- After prompting, detected values are merged with user answers
+
+**Before** (all questions shown with defaults):
+```
+Project name: (coffe-shop)     ← user has to press Enter
+Tech stack: (Node.js + Express + EJS)  ← user has to press Enter
+Package manager: (npm)         ← user has to press Enter
+Default branch: (main)         ← user has to press Enter
+```
+
+**After** (only missing values asked):
+```
+📡 Detected from your repo:
+
+  ✔ Project name:    coffe-shop
+  ✔ Tech stack:      Node.js + Express + EJS
+  ✔ Pkg manager:     npm
+  ✔ Default branch:  main
+  ? Description:     will ask
+  
+  ✔ All project info detected automatically.
+
+⚙️  Conventions
+  ✔ Default branch: main
+  ✔ Standards: eslint
+  
+  Commit message format: (prompted)
+```
+
+### Files Changed in Phase 7
+
+| File | Change |
+|------|--------|
+| `src/templates/agents/tech-lead.md` | Added ⛔ CRITICAL block at top (Layer 3), "ask human" enforcement |
+| `src/generators/claude-md.mjs` | Added ⛔ CRITICAL RULE block in `buildDelegationProtocol()` (Layer 1) |
+| `src/generators/workflow.mjs` | Added ⛔ block in `buildDelegationProtocol()` (Layer 2) |
+| `src/wizard/init-wizard.mjs` | Auto-skip detected values, new `printDetected()` with ✅/? markers |
+| `coffe-shop/CLAUDE.md` | Applied Layer 1 ⛔ block (generated copy) |
+| `coffe-shop/.claude/WORKFLOW.md` | Applied Layer 2 ⛔ block (generated copy) |
+| `coffe-shop/.claude/agents/tech-lead.md` | Applied Layer 3 ⛔ block (generated copy) |
+
+### Key Insight
+
+> The "do not write code" instruction must appear in EVERY file the Tech Lead reads, not just the agent template. Claude Code loads `CLAUDE.md` first, then `WORKFLOW.md`, then the agent file. If the first two files don't mention the restriction, the agent may already be in "implementation mode" by the time it reads the agent file.
+
+### Quotes That Drove Phase 7 Decisions
+
+> "agora ele fez por conta... não importa a stack o developer deveria criar essa nova funcionalidade"
+> "na falta de informação o tech lead pergunta pro humano"
+> "no comando do devcrew init inicial aquilo que já tem um valor default pois foi encontrado dentro do projeto não deveria ser perguntado, só é perguntado aquilo que não foi encontrado"
+> "o tech lead ainda assume toda responsabilidade do desenvolvimento e não delega as atividades para os agentes"
+
+---
+
+## Phase 8 — Maestri Role Assignment: Binding Agent Instructions to Terminals
+
+### The Problem Discovered
+
+After `devcrew init` recruited all 5 terminals in Maestri, the agents didn't follow their instructions because **no role was assigned to the terminals**. The user had to manually assign the Tech Lead role through the Maestri UI for it to work. The other 4 agents (Developer, PO, QA, DevOps) had no roles at all.
+
+User feedback: *"ao criar os agentes eles não estão sendo associados com seus respectivos papéis... para que o agente tech-lead funcionasse corretamente precisei manualmente adicionar a role descrita em tech-lead.md"*
+
+### Root Cause
+
+Maestri has a **role system** that binds agent instructions to terminals:
+
+1. **`preferences.json`** → `payload.rolePresets[]` — Global role definitions. Each role has:
+   - `id` — UUID
+   - `name` — Display name (e.g., "Tech Lead")
+   - `color` — Hex color
+   - `icon` — SF Symbol name
+   - `prompt` — **The full agent `.md` content** — this is what the terminal uses as its system prompt
+
+2. **`workspace.json`** → each node's `content.terminal._0.assignedRoleId` — Links a terminal to a role preset by UUID
+
+Without `assignedRoleId`, the terminal runs as a generic Claude Code instance with no agent instructions. The `claude --agent tech-lead` command loads the `.claude/agents/tech-lead.md` file, but the Maestri role provides an additional layer of instruction binding that reinforces the agent's behavior.
+
+### The Fix
+
+Added **Step 10** to `maestri.mjs` generator — `assignRolesToTerminals()`:
+
+1. **Read each agent's `.md` file** from `.claude/agents/` in the project directory
+2. **Create/update role presets** in `~/.maestri/preferences.json` — one per agent, with the full `.md` content as `prompt`
+3. **Quit Maestri** via `osascript` — CRITICAL: Maestri watches workspace.json and overwrites external changes via autosave
+4. **Assign `assignedRoleId`** to each terminal node in `workspace.json` — matching by command (`claude --agent <slug>`) or name
+5. **Re-open workspace** in Maestri to load the changes
+
+**CRITICAL DISCOVERY**: Modifying `workspace.json` while Maestri is running is useless — Maestri's autosave overwrites external changes within seconds. The file MUST be modified while Maestri is NOT running. The flow is: quit → modify → reopen.
+
+The function is idempotent — if a role preset already exists for an agent name, it updates the prompt content instead of creating a duplicate.
+
+### Technical Details
+
+```javascript
+// Role preset structure in preferences.json
+{
+  "color": "#AF52DE",
+  "icon": "person.text.rectangle",
+  "id": "E77D8A94-...",
+  "name": "Tech Lead",
+  "prompt": "---\nname: Tech Lead\nmodel: sonnet\n---\n\n# Tech Lead\n..."
+}
+
+// Terminal node in workspace.json — the assignedRoleId links to the role
+{
+  "agentType": "claude_code",
+  "assignedRoleId": "E77D8A94-...",  // ← THIS was missing
+  "command": "claude --agent tech-lead",
+  "name": "Tech Lead",
+  ...
+}
+```
+
+### Files Changed in Phase 8
+
+| File | Change |
+|------|--------|
+| `src/generators/maestri.mjs` | Added `assignRolesToTerminals()` function (Step 10), `writeFileSync` + `randomUUID` imports, `PREFERENCES_PATH` constant |
+
+### Key Insight
+
+> Maestri terminals need TWO things to work as agents: (1) the `claude --agent <slug>` command which loads the `.claude/agents/<slug>.md` file, and (2) an `assignedRoleId` linking to a role preset in `preferences.json` whose `prompt` field contains the same agent instructions. Without the role assignment, the terminal runs as a generic Claude Code instance.
+
+### Quotes That Drove Phase 8 Decisions
+
+> "ao criar os agentes eles não estão sendo associados com seus respectivos papéis"
+> "para que o agente tech-lead funcionasse corretamente precisei manualmente adicionar a role descrita em tech-lead.md"
+> "apos isso ele respeitou todas as regras e todos os sub-agentes foram executados com sucesso"
+> "criar o init inicial e já associar essas roles dentro dos terminais"

@@ -22,13 +22,15 @@
  *   - Maestri must be installed at /Applications/Maestri.app
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { execSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 const MAESTRI_DIR = join(homedir(), '.maestri');
 const WORKSPACES_DIR = join(MAESTRI_DIR, 'workspaces');
+const PREFERENCES_PATH = join(MAESTRI_DIR, 'preferences.json');
 
 /**
  * Agent color palette — maps agent slugs to hex colors
@@ -146,6 +148,16 @@ export async function generateMaestriWorkspace(config, opts = {}) {
     }
   }
 
+  // ── 5b. Open the workspace file in Maestri to ensure it's active ──
+  //    The recruit API requires the workspace to be actively open in the UI.
+  //    Just launching Maestri isn't enough — we must open the workspace file.
+  try {
+    execSync(`open -a Maestri ${escapeForShell(source.workspacePath)}`, { stdio: 'pipe' });
+    await sleep(2000);
+  } catch {
+    // Non-fatal — workspace might already be open
+  }
+
   // ── 6. Find the Unix socket ────────────────────────────────────────
   let socketPath = null;
   const maxRetries = 10;
@@ -207,7 +219,10 @@ export async function generateMaestriWorkspace(config, opts = {}) {
   }
 
   // ── 9. Recruit sub-agents ──────────────────────────────────────────
+  //    The recruit API requires the workspace to be actively loaded in the UI.
+  //    If we get "Workspace not found", re-open the workspace file and retry.
   const recruited = [];
+  let workspaceRetried = false;
 
   for (const agent of subAgents) {
     // Check if already recruited (idempotent)
@@ -217,12 +232,31 @@ export async function generateMaestriWorkspace(config, opts = {}) {
       continue;
     }
 
-    const result = maestriCli(socketPath, terminalId, [
+    let result = maestriCli(socketPath, terminalId, [
       'recruit',
       agent.name,
       '--preset', 'Claude Code',
       '--command', `claude --agent ${agent.slug}`,
     ]);
+
+    // If workspace not found, try re-opening the workspace file and retry
+    if (result && result.includes('Workspace not found') && !workspaceRetried) {
+      workspaceRetried = true;
+      try {
+        execSync(`open -a Maestri ${escapeForShell(source.workspacePath)}`, { stdio: 'pipe' });
+        await sleep(3000);
+      } catch {
+        // Non-fatal
+      }
+
+      // Retry recruitment for this agent
+      result = maestriCli(socketPath, terminalId, [
+        'recruit',
+        agent.name,
+        '--preset', 'Claude Code',
+        '--command', `claude --agent ${agent.slug}`,
+      ]);
+    }
 
     if (result && result.includes('Recruited')) {
       recruited.push(agent.name);
@@ -233,6 +267,35 @@ export async function generateMaestriWorkspace(config, opts = {}) {
     await sleep(500);
   }
 
+  // ── 10. Assign roles to all terminals ─────────────────────────────
+  //    Maestri uses "role presets" (stored in preferences.json) to bind
+  //    agent instructions to terminals. Each role has a `prompt` field
+  //    containing the full agent .md content.
+  //
+  //    CRITICAL: Maestri watches workspace.json and overwrites external
+  //    changes via autosave. We MUST quit Maestri before modifying
+  //    workspace.json, then reopen it.
+  //
+  //    Steps:
+  //    a) Read each agent's .md template from .claude/agents/
+  //    b) Create/update role presets in preferences.json (safe while running)
+  //    c) Quit Maestri (so it flushes workspace.json to disk)
+  //    d) Assign assignedRoleId to each terminal node in workspace.json
+  //    e) Re-open workspace in Maestri to load the changes
+  try {
+    const roleAssignments = assignRolesToTerminals(
+      source.workspacePath,
+      config.cwd,
+      agents,
+    );
+
+    if (roleAssignments.success) {
+      console.log(`  ✅ Assigned roles to ${roleAssignments.assigned.length} terminals`);
+    }
+  } catch (err) {
+    console.warn(`  ⚠ Could not assign roles to terminals: ${err.message}`);
+  }
+
   return {
     path: source.workspacePath,
     workspaceId: source.workspaceId,
@@ -240,6 +303,134 @@ export async function generateMaestriWorkspace(config, opts = {}) {
     recruited,
     terminalId,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Role Assignment
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Assign agent roles to Maestri terminals.
+ *
+ * Maestri's role system:
+ *   - `preferences.json` → `payload.rolePresets[]` — global role definitions
+ *     Each role has: { id, name, color, icon, prompt }
+ *     The `prompt` field contains the full agent .md content
+ *   - `workspace.json` → each node's `content.terminal._0.assignedRoleId`
+ *     Links a terminal to a role preset by UUID
+ *
+ * @param {string} workspacePath - Path to workspace.json
+ * @param {string} projectDir - Path to the project directory (where .claude/agents/ lives)
+ * @param {object[]} agents - Agent config array from wizard
+ * @returns {{ success: boolean, assigned: string[] }}
+ */
+function assignRolesToTerminals(workspacePath, projectDir, agents) {
+  // ── a) Read agent .md files ──────────────────────────────────────
+  const agentPrompts = {};
+  for (const agent of agents) {
+    const mdPath = join(projectDir, '.claude', 'agents', `${agent.slug}.md`);
+    if (existsSync(mdPath)) {
+      agentPrompts[agent.slug] = readFileSync(mdPath, 'utf-8');
+    }
+  }
+
+  // ── b) Create/update role presets in preferences.json ────────────
+  //    Safe to modify while Maestri is running — preferences are only
+  //    read at startup, not watched.
+  if (!existsSync(PREFERENCES_PATH)) {
+    return { success: false, assigned: [] };
+  }
+
+  const prefs = JSON.parse(readFileSync(PREFERENCES_PATH, 'utf-8'));
+  if (!prefs.payload.rolePresets) {
+    prefs.payload.rolePresets = [];
+  }
+
+  // Map: agent slug → role ID (reuse existing or create new)
+  const roleIdMap = {};
+
+  for (const agent of agents) {
+    const prompt = agentPrompts[agent.slug];
+    if (!prompt) continue;
+
+    // Check if a role preset already exists for this agent name
+    let existing = prefs.payload.rolePresets.find(
+      (r) => r.name === agent.name
+    );
+
+    if (existing) {
+      // Update the prompt content
+      existing.prompt = prompt;
+      existing.color = AGENT_COLORS[agent.slug] || existing.color;
+      roleIdMap[agent.slug] = existing.id;
+    } else {
+      // Create a new role preset
+      const roleId = randomUUID().toUpperCase();
+      prefs.payload.rolePresets.push({
+        color: AGENT_COLORS[agent.slug] || '#007AFF',
+        icon: 'person.text.rectangle',
+        id: roleId,
+        name: agent.name,
+        prompt,
+      });
+      roleIdMap[agent.slug] = roleId;
+    }
+  }
+
+  // Write updated preferences
+  writeFileSync(PREFERENCES_PATH, JSON.stringify(prefs, null, 2), 'utf-8');
+
+  // ── c) Quit Maestri so it flushes workspace.json to disk ─────────
+  //    CRITICAL: Maestri watches workspace.json and overwrites external
+  //    changes via autosave. We must quit it before modifying the file.
+  try {
+    execSync('osascript -e \'tell application "Maestri" to quit\'', { stdio: 'pipe' });
+  } catch {
+    // Maestri might not be running — that's fine
+  }
+
+  // Wait for Maestri to fully quit and flush the file
+  for (let i = 0; i < 10; i++) {
+    if (!isMaestriRunning()) break;
+    execSync('sleep 0.5', { stdio: 'pipe' });
+  }
+
+  // ── d) Assign assignedRoleId to terminal nodes in workspace.json ─
+  //    Now safe to modify — Maestri is not running.
+  const workspace = JSON.parse(readFileSync(workspacePath, 'utf-8'));
+  const assigned = [];
+
+  for (const node of workspace.payload.nodes) {
+    const term = node.content?.terminal?._0;
+    if (!term) continue;
+
+    // Match terminal to agent by command (e.g., "claude --agent tech-lead")
+    const matchedAgent = agents.find((a) => {
+      const expectedCmd = `claude --agent ${a.slug}`;
+      return term.command === expectedCmd;
+    });
+
+    // Also match by name as fallback
+    const matchedByName = matchedAgent || agents.find((a) => term.name === a.name);
+    const agent = matchedAgent || matchedByName;
+
+    if (agent && roleIdMap[agent.slug]) {
+      term.assignedRoleId = roleIdMap[agent.slug];
+      assigned.push(agent.name);
+    }
+  }
+
+  // Write updated workspace
+  writeFileSync(workspacePath, JSON.stringify(workspace, null, 2), 'utf-8');
+
+  // ── e) Re-open workspace in Maestri ──────────────────────────────
+  try {
+    execSync(`open -a Maestri ${escapeForShell(workspacePath)}`, { stdio: 'pipe' });
+  } catch {
+    // Non-fatal — user can open manually
+  }
+
+  return { success: assigned.length > 0, assigned };
 }
 
 // ═══════════════════════════════════════════════════════════════════════

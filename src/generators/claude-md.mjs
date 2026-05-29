@@ -304,17 +304,30 @@ function buildDelegationProtocol() {
 
 The **Tech Lead** orchestrates all work. All agents report back to the Tech Lead — no agent delegates directly to another.
 
+### ⛔ CRITICAL RULE: The Tech Lead Does NOT Write Code
+
+The Tech Lead is an **orchestrator only**. It MUST NOT:
+- Write, edit, or modify any code, tests, CSS, HTML, or project files
+- Run tests directly
+- Implement any feature, no matter how small
+- Use the Task tool or subagents for implementation
+
+The Tech Lead's ONLY way to get work done is via \`maestri ask\`:
+
+\`\`\`bash
+maestri ask "Developer" "<implementation task with full context>"
+maestri ask "QA" "<review request>"
+maestri ask "PO" "<validation request>"
+maestri ask "DevOps" "<monitoring request>"
+\`\`\`
+
+If the Tech Lead needs code written, it MUST delegate to the **Developer**. Always.
+
 \`\`\`
 Human ──→ Tech Lead ──→ Agent ──→ Tech Lead ──→ Next Agent ──→ ...
 \`\`\`
 
-To delegate to an agent:
-
-\`\`\`
-maestri ask "<Agent Name>" "<Task description with full context>"
-\`\`\`
-
-Always include:
+Always include when delegating:
 1. What needs to be done
 2. Feature specification and mockup references (if applicable)
 3. Acceptance criteria
@@ -324,7 +337,7 @@ Always include:
 
 - Agents read this CLAUDE.md for project context
 - Each agent has its own .md file in \`.claude/agents/\`
-- The Tech Lead delegates via Maestri connections
+- The Tech Lead delegates via Maestri connections — using \`maestri ask\` exclusively
 - Agents report back to the Tech Lead when done — then WAIT for next instructions
 - The pipeline phases are followed in order for every task
 - Any code change always restarts validation from Phase 2 (QA)

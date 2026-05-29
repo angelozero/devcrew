@@ -289,6 +289,10 @@ function buildDelegationProtocol(agents) {
 
 The **${orchestratorName}** is the orchestrator. All task delegation flows through them.
 
+### ⛔ The ${orchestratorName} Does NOT Write Code
+
+The ${orchestratorName} MUST NOT write, edit, or modify any code, tests, CSS, HTML, or project files. It is an orchestrator — its only tool for getting work done is \`maestri ask\`. If code needs to be written, the ${orchestratorName} delegates to the **Developer**. No exceptions.
+
 ### Communication Flow
 
 All agents report back to the **${orchestratorName}** after completing their task. No agent delegates directly to another agent. The ${orchestratorName} decides what happens next based on each agent's report.

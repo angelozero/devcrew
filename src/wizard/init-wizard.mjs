@@ -5,12 +5,13 @@
  * - Scans the repo automatically
  * - Presents what was detected
  * - Asks ONLY what cannot be inferred
+ * - Auto-detected values are accepted silently — only missing values are prompted
  * - No Architect/Developer personas — one flow for everyone
  *
  * Minimal questions:
- *   1. Confirm/correct detected project info
- *   2. Commit format (human decision)
- *   3. Test strategy (if no tests detected)
+ *   1. Show detected info, ask ONLY for missing fields
+ *   2. Commit format (always asked — human decision)
+ *   3. Conventions (only missing ones)
  *   4. External context (Confluence URL, related repos)
  *   5. Business/technical rules (optional)
  *   6. Agents (5 defaults + optional customization)
@@ -76,53 +77,104 @@ const ROLE_COLOR_PALETTE = [
  * @returns {object|null} Config object or null if cancelled
  */
 export async function initWizard(cwd, detected) {
-  // ── Step 1: Show detected info + confirm/correct ───────────────────
+  // ── Step 1: Show detected info, ask ONLY for missing fields ────────
   console.log(chalk.bold.underline('\n📡 Detected from your repo:\n'));
 
   printDetected(detected);
 
   console.log('');
-  console.log(chalk.dim('  You can confirm or correct the detected values below.\n'));
 
-  const projectInfo = await inquirer.prompt([
-    {
+  // Build list of project info questions — only ask what wasn't detected
+  const projectQuestions = [];
+
+  if (!detected.name) {
+    projectQuestions.push({
       type: 'input',
       name: 'name',
       message: 'Project name:',
-      default: detected.name || '',
+      default: '',
       validate: (v) => v.trim().length > 0 || 'Project name is required',
-    },
-    {
+    });
+  }
+
+  if (!detected.description) {
+    projectQuestions.push({
       type: 'input',
       name: 'description',
       message: 'Project description:',
-      default: detected.description || '',
-    },
-    {
+      default: '',
+    });
+  }
+
+  if (!detected.stack) {
+    projectQuestions.push({
       type: 'input',
       name: 'stack',
       message: 'Tech stack:',
-      default: detected.stack || '',
+      default: '',
       validate: (v) => v.trim().length > 0 || 'Tech stack is required',
-    },
-    {
+    });
+  }
+
+  if (!detected.packageManager) {
+    projectQuestions.push({
       type: 'input',
       name: 'packageManager',
       message: 'Package manager:',
-      default: detected.packageManager || '',
-    },
-  ]);
+      default: '',
+    });
+  }
+
+  let projectAnswers = {};
+  if (projectQuestions.length > 0) {
+    console.log(chalk.dim('  Fill in the missing values below:\n'));
+    projectAnswers = await inquirer.prompt(projectQuestions);
+  } else {
+    console.log(chalk.green('  ✔ All project info detected automatically.\n'));
+  }
+
+  // Merge: detected values take priority, user answers fill the gaps
+  const projectInfo = {
+    name: detected.name || projectAnswers.name || '',
+    description: detected.description || projectAnswers.description || '',
+    stack: detected.stack || projectAnswers.stack || '',
+    packageManager: detected.packageManager || projectAnswers.packageManager || '',
+  };
 
   // ── Step 2: Conventions ───────────────────────────────────────────
   console.log(chalk.bold.underline('\n⚙️  Conventions\n'));
 
-  const conventions = await inquirer.prompt([
-    {
+  // Show auto-detected conventions
+  if (detected.defaultBranch) {
+    console.log(`  ${chalk.green('✔')} Default branch: ${chalk.white(detected.defaultBranch)}`);
+  }
+  if (detected.detectedStandards.length > 0) {
+    console.log(`  ${chalk.green('✔')} Coding standards: ${chalk.white(detected.detectedStandards.join(', '))}`);
+  }
+  if (detected.hasTests) {
+    const testLabel = detected.testFramework
+      ? `${detected.testFramework} — unit + integration`
+      : 'unit + integration';
+    console.log(`  ${chalk.green('✔')} Test strategy: ${chalk.white(testLabel)}`);
+  }
+
+  const hasAutoConventions = detected.defaultBranch || detected.detectedStandards.length > 0 || detected.hasTests;
+  if (hasAutoConventions) console.log('');
+
+  // Build convention questions — only ask what wasn't detected
+  const conventionQuestions = [];
+
+  if (!detected.defaultBranch) {
+    conventionQuestions.push({
       type: 'input',
       name: 'defaultBranch',
       message: 'Default branch for PRs:',
-      default: detected.defaultBranch || 'main',
-    },
+      default: 'main',
+    });
+  }
+
+  // Commit format is ALWAYS asked — it's a human decision
+  conventionQuestions.push(
     {
       type: 'list',
       name: 'commitFormat',
@@ -142,21 +194,39 @@ export async function initWizard(cwd, detected) {
       when: (ans) => ans.commitFormat === 'custom',
       validate: (v) => v.trim().length > 0 || 'Commit format is required',
     },
-    {
+  );
+
+  if (detected.detectedStandards.length === 0) {
+    conventionQuestions.push({
       type: 'input',
       name: 'codingStandards',
       message: 'Coding standards (comma-separated, optional):',
-      default: detected.detectedStandards.length > 0 ? detected.detectedStandards.join(', ') : '',
-    },
-    {
+      default: '',
+    });
+  }
+
+  if (!detected.hasTests) {
+    conventionQuestions.push({
       type: 'input',
       name: 'testStrategy',
       message: 'Test strategy:',
-      default: detected.hasTests
-        ? (detected.testFramework ? `${detected.testFramework} — unit + integration` : 'unit + integration')
-        : 'unit + integration',
-    },
-  ]);
+      default: 'unit + integration',
+    });
+  }
+
+  const conventionAnswers = await inquirer.prompt(conventionQuestions);
+
+  // Merge: detected values take priority, user answers fill the gaps
+  const conventions = {
+    ...conventionAnswers,
+    defaultBranch: detected.defaultBranch || conventionAnswers.defaultBranch || 'main',
+    codingStandards: detected.detectedStandards.length > 0
+      ? detected.detectedStandards.join(', ')
+      : (conventionAnswers.codingStandards || ''),
+    testStrategy: detected.hasTests
+      ? (detected.testFramework ? `${detected.testFramework} — unit + integration` : 'unit + integration')
+      : (conventionAnswers.testStrategy || 'unit + integration'),
+  };
 
   // ── Step 3: External Context ──────────────────────────────────────
   console.log(chalk.bold.underline('\n🔗 External Context (optional)\n'));
@@ -259,10 +329,16 @@ export async function initWizard(cwd, detected) {
     ? contextAnswers.contextFiles.split(',').map((s) => s.trim()).filter(Boolean)
     : [];
 
+  const finalConventions = {
+    ...conventions,
+    commitFormat,
+    codingStandards,
+  };
+
   console.log(chalk.bold.underline('\n✅ Summary\n'));
   printSummary({
     projectInfo,
-    conventions: { ...conventions, commitFormat, codingStandards },
+    conventions: finalConventions,
     contextAnswers: { ...contextAnswers, relatedRepos, contextFiles },
     agents,
     cwd,
@@ -302,10 +378,10 @@ export async function initWizard(cwd, detected) {
       detectedStandards: detected.detectedStandards,
     },
     conventions: {
-      defaultBranch: conventions.defaultBranch.trim(),
+      defaultBranch: finalConventions.defaultBranch.trim(),
       commitFormat,
       codingStandards,
-      testStrategy: conventions.testStrategy.trim(),
+      testStrategy: finalConventions.testStrategy.trim(),
     },
     agents,
   };
@@ -398,21 +474,25 @@ async function customizeAgents(defaultAgents) {
  * ================================================================ */
 
 function printDetected(detected) {
-  const row = (label, value, fallback = chalk.dim('not detected')) =>
-    console.log(`  ${chalk.cyan(label.padEnd(20))} ${value ? chalk.white(value) : fallback}`);
+  const found = (label, value) =>
+    console.log(`  ${chalk.green('✔')} ${chalk.cyan(label.padEnd(18))} ${chalk.white(value)}`);
+  const missing = (label) =>
+    console.log(`  ${chalk.yellow('?')} ${chalk.cyan(label.padEnd(18))} ${chalk.yellow('will ask')}`);
 
-  row('Project name:', detected.name);
-  row('Description:', detected.description ? truncate(detected.description, 60) : null);
-  row('Tech stack:', detected.stack);
-  row('Package manager:', detected.packageManager);
-  row('Default branch:', detected.defaultBranch);
-  row('Tests:', detected.hasTests
-    ? chalk.green(`✔ detected${detected.testFramework ? ` (${detected.testFramework})` : ''}`)
-    : chalk.dim('none found'));
-  row('Coding standards:', detected.detectedStandards.length > 0
-    ? detected.detectedStandards.join(', ')
-    : null);
-  row('Architecture doc:', detected.architectureDoc ? chalk.green('✔ ARCHITECTURE.md found') : null);
+  detected.name ? found('Project name:', detected.name) : missing('Project name:');
+  detected.description ? found('Description:', truncate(detected.description, 55)) : missing('Description:');
+  detected.stack ? found('Tech stack:', detected.stack) : missing('Tech stack:');
+  detected.packageManager ? found('Pkg manager:', detected.packageManager) : missing('Pkg manager:');
+  detected.defaultBranch ? found('Default branch:', detected.defaultBranch) : missing('Default branch:');
+  detected.hasTests
+    ? found('Tests:', `detected${detected.testFramework ? ` (${detected.testFramework})` : ''}`)
+    : missing('Tests:');
+  detected.detectedStandards.length > 0
+    ? found('Standards:', detected.detectedStandards.join(', '))
+    : missing('Standards:');
+  if (detected.architectureDoc) {
+    found('Architecture:', 'ARCHITECTURE.md found');
+  }
 }
 
 function printSummary({ projectInfo, conventions, contextAnswers, agents, cwd }) {
