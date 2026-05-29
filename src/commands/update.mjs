@@ -243,18 +243,18 @@ function slugToName(slug) {
 function inferRole(slug) {
   if (slug.includes('lead') || slug.includes('orchestrat')) return 'orchestrator';
   if (slug.includes('dev') || slug.includes('implement') || slug.includes('engineer')) return 'executor';
-  if (slug.includes('guard') || slug.includes('quality') || slug.includes('analyst') || slug.includes('biz') || slug.includes('review')) return 'validator';
-  if (slug.includes('sentinel') || slug.includes('monitor') || slug.includes('watch')) return 'monitor';
+  if (slug.includes('qa') || slug.includes('po') || slug.includes('guard') || slug.includes('quality') || slug.includes('analyst') || slug.includes('biz') || slug.includes('review')) return 'validator';
+  if (slug.includes('devops') || slug.includes('sentinel') || slug.includes('monitor') || slug.includes('watch')) return 'monitor';
   return 'executor';
 }
 
 function inferColor(slug) {
   const colorMap = {
     'tech-lead': '#AF52DE',
-    'developer': '#34C759',
-    'biz-analyst': '#007AFF',
-    'quality-guard': '#FF9500',
-    'sentinel': '#FF3B30',
+    'developer': '#007AFF',
+    'po': '#FF9500',
+    'qa': '#34C759',
+    'devops': '#FF3B30',
   };
   return colorMap[slug] || '#8E8E93';
 }

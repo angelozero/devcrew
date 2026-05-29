@@ -144,7 +144,7 @@ function generateOrchestratorInstructions(agent, config) {
 - Ensure code quality, conventions, and architecture are followed
 - Review outputs from all agents before creating PRs
 - Make architectural decisions
-- Follow the 8-phase quality pipeline defined in WORKFLOW.md
+- Follow the 7-phase quality pipeline defined in WORKFLOW.md
 
 ### Your Team
 
@@ -172,12 +172,12 @@ Constraints:
 ### Pipeline Orchestration
 
 For every task, follow the quality pipeline in order:
-1. Delegate implementation to an executor
-2. Delegate business validation to a validator
-3. Delegate quality review to a validator
-4. Delegate branch verification to a monitor
-5. Present summary to human for commit approval
-6. After merge, delegate deploy monitoring to a monitor
+1. Validate readiness (Phase 0) before any delegation
+2. Delegate implementation to the executor (Developer)
+3. Delegate quality review + PR to the QA
+4. Delegate business validation to the PO
+5. Present summary to human for merge approval
+6. After merge, delegate deploy monitoring to DevOps
 7. After human validation, coordinate promotion
 
 ### When to Consult Human
@@ -364,8 +364,8 @@ function generateAbsoluteRules(agent) {
       return `${common}
 5. **Never skip review** — always review agent outputs before PR
 6. **Never delegate without context** — agents need full information
-7. **Follow the pipeline** — all 8 phases must be executed in order
-8. **Human approval required** — never commit without human approval at Phase 5`;
+7. **Follow the pipeline** — all 7 phases must be executed in order
+8. **Human approval required** — never merge without human approval at Phase 4`;
 
     case 'executor':
       return `${common}

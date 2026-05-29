@@ -40,21 +40,38 @@ export async function generate(config, opts = {}) {
     },
     {
       label: 'Maestri workspace',
+      longLabel: 'Maestri workspace (launching app & recruiting agents...)',
       fn: () => generateMaestriWorkspace(config, { dryRun }),
     },
   ];
 
   console.log(chalk.bold('\n📦 Generating files...\n'));
 
+  let maestriResult = null;
+
   for (const step of steps) {
     const spinner = ora({ text: step.label, prefixText: '  ' }).start();
     try {
+      // For long-running steps, update the spinner text
+      if (step.longLabel && !dryRun) {
+        spinner.text = step.longLabel;
+      }
+
       const result = await step.fn();
+
       if (dryRun) {
         spinner.info(chalk.dim(`${step.label} (dry run — would generate)`));
         if (result?.preview) {
           console.log(chalk.dim(`    → ${result.preview}`));
         }
+      } else if (result?.skipped) {
+        // Maestri workspace couldn't be configured
+        spinner.warn(chalk.yellow(`${step.label} — skipped`));
+        maestriResult = result;
+      } else if (result?.recruited) {
+        // Maestri workspace configured with recruited agents
+        const count = result.recruited.length + 1; // +1 for orchestrator
+        spinner.succeed(`Maestri workspace (${count} terminals configured)`);
       } else {
         spinner.succeed(step.label);
       }
@@ -66,13 +83,20 @@ export async function generate(config, opts = {}) {
   console.log('');
   if (dryRun) {
     console.log(chalk.yellow('  🔍 Dry run complete — no files were written.'));
+  } else if (maestriResult?.skipped) {
+    console.log(chalk.green.bold('  ✅ Agent files generated successfully!'));
+    console.log('');
+    console.log(chalk.yellow.bold('  ⚠️  Maestri workspace requires a manual step:'));
+    console.log('');
+    for (const line of maestriResult.message.split('\n')) {
+      console.log(chalk.dim(`  ${line}`));
+    }
   } else {
     console.log(chalk.green.bold('  ✅ DevCrew setup complete!'));
     console.log('');
-    console.log(chalk.dim('  Next steps:'));
-    console.log(chalk.dim('    1. Review the generated CLAUDE.md and enrich it if needed'));
-    console.log(chalk.dim('    2. Open Maestri to start working with your AI team'));
-    console.log(chalk.dim('    3. Click on the Tech Lead terminal to begin'));
+    console.log(chalk.dim('  Your AI team is ready in Maestri:'));
+    console.log(chalk.dim('    → Tech Lead (orchestrator) connected to all sub-agents'));
+    console.log(chalk.dim('    → Click on the Tech Lead terminal to begin'));
   }
   console.log('');
 }

@@ -115,24 +115,25 @@ The user approved these 5 agents as the **minimum viable set** for ensuring qual
 |-------|-----------|----------------|
 | **Tech Lead** | `orchestrator` | Receives tasks from human, delegates to other agents, runs the full pipeline |
 | **Developer** | `executor` | Implements features, writes tests, handles commits and code changes |
-| **Business Analyst** | `validator` | Validates implementation against business rules and requirements |
-| **Quality Guard** | `validator` | Reviews code quality, security, test coverage; performs PR review |
-| **Sentinel** | `monitor` | Checks develop branch state before PR; monitors CI/CD pipeline logs after deploy |
+| **PO** | `validator` | Validates implementation against business rules, requirements, and UI mockups |
+| **QA** | `validator` | Reviews code quality, security, test coverage; opens PRs and evaluates merge safety |
+| **DevOps** | `monitor` | Monitors CI/CD pipeline logs after deploy; classifies errors as infra or code |
 
-### Decision 5: 8-Phase Quality Pipeline
+### Decision 5: Quality Pipeline (evolved from 8 to 7 phases in Phase 4)
 
-The pipeline was designed based on the user's real-world workflow. Each phase has a responsible agent and clear entry/exit criteria:
+The pipeline was designed based on the user's real-world workflow. Each phase has a responsible agent and clear entry/exit criteria. Originally 8 phases, it was restructured to 7 phases (Phase 0–6) in Phase 4 of the project evolution.
+
+**Current pipeline (Phase 4+):**
 
 | Phase | Name | Responsible Agent | Description |
 |-------|------|-------------------|-------------|
+| 0 | Readiness Gate ⛩️ | Tech Lead | Validate docs, mockups, business rules exist before implementation |
 | 1 | Implementation | Developer | Write code, tests, and documentation |
-| 2 | Business Rules Validation | Business Analyst | Verify implementation matches business requirements |
-| 3 | Quality Review | Quality Guard | Review code quality, security, test coverage |
-| 4 | Branch Verification | Sentinel | Check develop branch for conflicts or issues |
-| 5 | Commit Approval | **Human** | Human reviews and approves the commit |
-| 6 | PR + Merge | **Human** | Human reviews PR on GitHub and merges |
-| 7 | Deploy Monitoring | Sentinel | Monitor CI/CD pipeline logs for errors |
-| 8 | Promotion | **Human** + Sentinel | Human validates in environment; Sentinel assists |
+| 2 | Quality Review + PR | QA | Review code quality, security, test coverage; open PR; evaluate merge safety |
+| 3 | Business & Implementation Validation | PO | Verify implementation matches business requirements and mockups |
+| 4 | Human Approval | **Human** | Human reviews and merges PR on GitHub |
+| 5 | Deploy Monitoring | DevOps | Monitor CI/CD pipeline logs for errors; classify as infra or code |
+| 6 | Promotion (Optional) | **Human** + DevOps | Human validates in environment; DevOps assists |
 
 ### Decision 6: Human Intervention Points
 
@@ -141,11 +142,11 @@ The user defined **exactly** when humans intervene in the automated pipeline. Ev
 | Intervention Point | Description |
 |--------------------|-------------|
 | **Initial prompt** | Human gives the task to Tech Lead — this is the only "development" prompt |
-| **Commit approval** | Human approves after the full validation chain (Biz Analyst → Quality Guard → Sentinel) |
-| **PR merge** | Human reviews and merges on GitHub (the review itself is done by Quality Guard) |
+| **Commit approval** | Human approves after the full validation chain (QA → PO → DevOps) |
+| **PR merge** | Human reviews and merges on GitHub (the review itself is done by QA) |
 | **Post-deploy validation** | Human tests in the deployed environment |
 | **Architecture decisions** | AI consults human when facing architectural uncertainty |
-| **Infrastructure errors** | Sentinel reports infrastructure issues to human (AI can't fix infra) |
+| **Infrastructure errors** | DevOps reports infrastructure issues to human (AI can't fix infra) |
 
 ### Decision 7: Confluence Integration in V0
 
@@ -177,20 +178,19 @@ The user emphasized developer autonomy:
   - User-created agents (not in `project.yaml`) → **never touched**
 - `--force` flag available to overwrite existing agent files when intentional
 
-### Decision 9: Sentinel Combines Two Functions
+### Decision 9: DevOps Monitors CI/CD (formerly "Sentinel Combines Two Functions")
 
-Instead of creating separate agents for branch checking and CI/CD monitoring, the Sentinel agent handles both:
+The DevOps agent (formerly Sentinel) focuses on post-merge CI/CD monitoring. Branch verification was merged into the QA's merge safety evaluation.
 
 | Function | Pipeline Phase | What It Does |
 |----------|---------------|--------------|
-| Branch checking | Phase 4 (before PR) | Checks develop branch for conflicts, failing tests, or issues |
-| CI/CD monitoring | Phase 7 (after deploy) | Monitors pipeline logs for errors after merge |
+| CI/CD monitoring | Phase 5 (after deploy) | Monitors pipeline logs for errors after merge |
 
-**Error classification by Sentinel**:
+**Error classification by DevOps**:
 - **Infrastructure errors** → Report to human (AI cannot fix infrastructure)
 - **Code errors** → Report to Developer agent for automated fix
 
-### Decision 10: Quality Guard Does PR Review
+### Decision 10: QA Does PR Review (formerly "Quality Guard Does PR Review")
 
 > *"O review deveria ser um agente olhando pra isso e não um humano"*
 >
@@ -558,3 +558,308 @@ The V1 redesign was validated against the `coffe-shop` project:
 - **Description**: detected from `package.json` → `"A simple coffee shop CRUD application with Node.js, Express, and EJS"`
 - **Architecture**: `ARCHITECTURE.md` present with full documentation
 - **Tests**: none (correctly detected as `hasTests: false`)
+
+## Phase 3 — Maestri Workspace Integration
+
+### The Problem
+
+After V1 was implemented, `devcrew init` generated a Maestri workspace from scratch.
+Maestri consistently rejected it with: **"This workspace was saved by a newer version of Maestri and can't be opened"**.
+
+### Root Cause (discovered through extensive testing)
+
+Maestri **validates workspace.json structurally** — not just the JSON format, but the number and structure of nodes. Modifying existing field values (name, command, color) works, but adding or removing nodes from the `nodes[]` array always triggers the "newer version" error, regardless of the method used.
+
+### What Was Tried (and failed)
+
+1. **Creating workspace from scratch** (Node.js, Swift, Python) — always rejected
+2. **Apple JSON format** (`"key" : value` with spaces) — byte-identical to Apple's output, but not sufficient
+3. **Deep-cloning terminal nodes** and writing back — rejected (node count changed)
+4. **In-place file writes** preserving inode — rejected
+5. **sed insertion** of new node blocks — rejected
+6. **Every possible file writing method** — all rejected when node count changes
+
+### What Works: Hybrid sed + Socket API Approach
+
+The breakthrough came from discovering Maestri's **internal CLI API**:
+
+1. **`sed` substitution of existing values** — Maestri accepts changes to field values (name, command, color, isManager, workingDirectory) as long as the JSON structure (number of nodes, connections) stays the same
+2. **Maestri Unix socket API** — Maestri exposes an HTTP API on a Unix domain socket at `/var/folders/.../maestri-XXXX/maestri.sock`. The `maestri` CLI binary (at `/Applications/Maestri.app/Contents/Resources/maestri`) communicates with this socket using `curl`
+3. **`recruit` command** — Creates new terminal nodes through Maestri's own API, which Maestri fully accepts. Auto-connects recruited terminals to the recruiting terminal
+4. **`isManager` flag** — The recruiting terminal must have `isManager: true` in workspace.json to use the `recruit` command
+
+### The Final Working Flow
+
+1. User creates workspace in Maestri with 1 Claude Code terminal, closes Maestri
+2. DevCrew modifies workspace.json via `sed`:
+   - Renames workspace to project name
+   - Renames terminal to "Tech Lead"
+   - Sets command to `claude --agent tech-lead`
+   - Sets color to purple (#AF52DE)
+   - Sets `isManager: true` (enables Maestro mode)
+   - Sets workingDirectory to project path
+3. DevCrew launches Maestri (`open -a Maestri`)
+4. DevCrew finds the Unix socket via `lsof -U -a -p <PID>`
+5. DevCrew sends `recruit` commands via `curl --unix-socket`:
+   ```
+   curl --unix-socket /path/to/maestri.sock http://localhost/cli \
+     -X POST -H "Content-Type: application/json" \
+     -H "X-Terminal-ID: <tech-lead-uuid>" \
+     -d '{"args":["recruit","Developer","--preset","Claude Code","--command","claude --agent developer"]}'
+   ```
+6. Each `recruit` creates a terminal and auto-connects it to Tech Lead
+7. Result: 5 terminals in hub/star layout with 4 connections
+
+### Key Technical Details
+
+- **Apple JSON format**: `"key" : value` (spaces around colon), forward slashes escaped as `\/`
+- **sed delimiter**: Uses `|` instead of `/` to avoid conflicts with `\/` in paths
+- **sed escaping**: Forward slashes in Apple JSON (`\/`) require `\\/` in sed patterns (double-escaped backslash)
+- **Socket path**: Changes on each Maestri launch — discovered dynamically via `lsof`
+- **Terminal ID**: Read from workspace.json after sed modifications, used as `X-Terminal-ID` header
+- **Idempotent**: Checks `maestri list` before recruiting to skip already-existing agents
+- **Free plan**: Maestri's free plan allows only 1 workspace
+
+### Maestri CLI Commands Discovered
+
+| Command | Description |
+|---------|-------------|
+| `maestri list` | List current terminal and connected agents/notes/portals |
+| `maestri recruit "Name" [--preset "Claude Code"] [--command "..."]` | Create new terminal, auto-connect to caller |
+| `maestri dismiss "Name"` | Remove a recruited terminal |
+| `maestri connect "From" "To"` | Wire two terminals/notes together |
+| `maestri role create "Name" "Prompt"` | Create a role preset |
+| `maestri role assign "Recruit" "Role"` | Assign role to a recruit |
+| `maestri ask "Agent" "prompt"` | Send a message to an agent |
+| `maestri check "Agent"` | Read an agent's output |
+
+### Decision: "sed + Socket API" Approach
+
+The `maestri.mjs` generator was rewritten to:
+- Scan `~/.maestri/workspaces/` for an existing workspace with at least 1 terminal
+- Modify the terminal's properties via `sed` (name, command, color, isManager, workingDirectory)
+- Launch Maestri and find its Unix socket
+- Use the socket API to `recruit` the remaining 4 agents
+- If workspace not found: skip gracefully and show instructions
+
+### Files Changed in Phase 3
+
+| Action | File |
+|--------|------|
+| REWRITE | `src/generators/maestri.mjs` — sed + socket API approach |
+| MODIFY | `src/generators/index.mjs` — handle recruited agents in output |
+| MODIFY | `README.md` — updated Maestri setup steps and troubleshooting |
+| MODIFY | `README.pt-BR.md` — same updates in Portuguese |
+
+## Phase 4 — Pipeline Redesign: Readiness Gate & Strict Agent Handoffs
+
+**Date**: 2026-05
+**Trigger**: First real-world test of the agent pipeline on the `coffe-shop` project
+
+### The Problem Discovered
+
+When the user told the Tech Lead agent "implement the new search filter field", the Tech Lead **did everything by itself** — it implemented the code, wrote the tests, and completed the task without delegating to any other agent. The entire quality pipeline was bypassed.
+
+The expected behavior was:
+1. Tech Lead should **validate readiness** first (does the task have a feature spec? a mockup? business rules?)
+2. Only then delegate to the Developer for implementation
+3. After Developer finishes → QA reviews + opens PR
+4. After QA approves → PO validates business rules
+5. After PO approves → Human merges
+6. After merge → DevOps monitors pipeline
+7. If errors → classify and route back appropriately
+
+### Root Cause
+
+The Tech Lead template had the pipeline phases documented but lacked:
+1. **A mandatory pre-implementation gate** — nothing stopped it from jumping straight to implementation
+2. **Explicit "report and wait" instructions** — agents didn't know they should stop and wait for the Tech Lead after completing their task
+3. **Clear handoff protocol** — the flow between agents was described but not enforced through explicit instructions
+4. **Readiness validation** — no concept of checking if documentation, mockups, and business rules exist before starting work
+
+### The Solution: 3 Key Changes
+
+#### Change 1: Phase 0 — Readiness Gate ⛩️
+
+Added a mandatory **Phase 0** before any implementation begins. The Tech Lead must validate:
+
+| Check | Applies When | What to Look For |
+|-------|-------------|-----------------|
+| Feature specification | Always | Doc in `docs/`, Confluence, or CLAUDE.md with requirements |
+| Business rules | Always | Defined rules in CLAUDE.md or feature spec |
+| Acceptance criteria | Always | Explicit, testable criteria |
+| Visual mockup | UI/frontend tasks | HTML mockup, image, wireframe, or Figma link in `docs/` |
+| Interaction behaviors | UI/frontend tasks | What happens on click, type, hover, etc. |
+
+**Decision outcomes**:
+- ✅ **READY** → Proceed to Phase 1
+- ⚠️ **PARTIALLY READY** → Ask human if they want to proceed
+- ❌ **NOT READY** → Report missing items to human, STOP
+
+**Key rule**: The Tech Lead must NEVER delegate to the Developer without confirming readiness.
+
+#### Change 2: "Report and Wait" Protocol
+
+Every agent now has an explicit instruction at the end of their template:
+
+> **After reporting, WAIT for the Tech Lead to decide next steps. Do NOT delegate to other agents or proceed to the next pipeline phase yourself.**
+
+This ensures:
+- The Developer implements and reports back → waits
+- The QA reviews, opens PR, and reports back → waits
+- The PO validates and reports back → waits
+- The DevOps monitors and reports back → waits
+- Only the Tech Lead decides what happens next
+
+#### Change 3: Restructured Pipeline (8 → 7 Phases)
+
+The old 8-phase pipeline was restructured into a cleaner 7-phase pipeline (Phase 0 through Phase 6):
+
+| Old Phase | New Phase | Change |
+|-----------|-----------|--------|
+| _(none)_ | **Phase 0 — Readiness Gate** | **NEW** — mandatory pre-implementation validation |
+| Phase 1 — Implementation | Phase 1 — Implementation | Same, but Developer now explicitly reports back and waits |
+| Phase 3 — Quality Review | Phase 2 — Quality Review + PR | **Moved up** — QA (formerly Quality Guard) now reviews first, opens PR, evaluates merge safety |
+| Phase 2 — Business Validation | Phase 3 — Business & Implementation Validation | **Moved down** — PO (formerly Business Analyst) validates after QA, also validates UI against mockups |
+| Phase 4 — Branch Verification | _(removed)_ | **Merged** into Phase 2 — QA handles merge safety |
+| Phase 5 — Commit Approval | Phase 4 — Human Approval | Renumbered |
+| Phase 6 — PR + Merge | _(merged into Phase 4)_ | **Merged** — human approval and merge are one step |
+| Phase 7 — Deploy Monitoring | Phase 5 — Deploy Monitoring | Renumbered; DevOps (formerly Sentinel) |
+| Phase 8 — Promotion | Phase 6 — Promotion | Renumbered, marked as optional |
+
+#### Key Structural Changes
+
+1. **QA now owns PR creation** — previously the Developer opened PRs, now the QA opens them only after quality review passes
+2. **PO now validates UI against mockups** — added "Visual Fidelity" dimension to validation
+3. **DevOps simplified** — removed pre-PR branch verification (now handled by QA's merge safety check), focused purely on post-merge pipeline monitoring
+4. **Pipeline order changed** — QA (Phase 2) runs before PO (Phase 3), so code quality is verified before business validation
+5. **Error handling loop is explicit** — any code fix restarts from Phase 2 (QA), never skips validation
+
+### Pipeline Flow Diagram
+
+```
+Human gives task
+       │
+       ▼
+Phase 0: Readiness Gate (Tech Lead)
+       │
+       ├── ❌ NOT READY → Report to Human, STOP
+       │
+       │ ✅ READY
+       ▼
+Phase 1: Implementation (Developer)
+       │
+       │ Reports "Done"
+       ▼
+Phase 2: Quality Review + PR (QA)
+       │
+       ├── ❌ CHANGES REQUESTED → Developer fixes → ↩ Phase 2
+       │
+       │ ✅ APPROVED + PR opened
+       ▼
+Phase 3: Business Validation (PO)
+       │
+       ├── ❌ FAIL → Developer fixes → ↩ Phase 2
+       │
+       │ ✅ PASS
+       ▼
+Phase 4: Human Approval → Human merges PR
+       │
+       │ Merged
+       ▼
+Phase 5: Deploy Monitoring (DevOps)
+       │
+       ├── 🏗️ Infra Error → Report to Human, WAIT
+       ├── 💻 Code Error → Developer fix → ↩ Phase 2
+       │
+       │ ✅ ALL CLEAR
+       ▼
+   ✅ COMPLETE
+```
+
+### Files Changed in Phase 4
+
+| Action | File |
+|--------|------|
+| REWRITE | `src/templates/agents/tech-lead.md` — Added Phase 0 Readiness Gate, restructured pipeline, explicit handoff protocol |
+| REWRITE | `src/templates/agents/developer.md` — Added "report and wait" protocol, explicit fix cycle handling, no PR creation |
+| REWRITE | `src/templates/agents/po.md` (was `biz-analyst.md`) — Added Visual Fidelity validation, mockup comparison, "report and wait" protocol |
+| REWRITE | `src/templates/agents/qa.md` (was `quality-guard.md`) — Added PR creation responsibility, merge safety evaluation, "report and wait" protocol |
+| REWRITE | `src/templates/agents/devops.md` (was `sentinel.md`) — Simplified to post-merge monitoring only, removed pre-PR branch verification, "report and wait" protocol |
+| REWRITE | `src/generators/workflow.mjs` — New pipeline with Phase 0, flow diagram, error handling section |
+| MODIFY | `src/generators/claude-md.mjs` — Updated buildPipeline() and buildDelegationProtocol() for new 7-phase pipeline |
+| MODIFY | `src/generators/maestri.mjs` — Updated AGENT_COLORS slug mappings for new agent names |
+
+### Quotes That Drove Phase 4 Decisions
+
+1. > *"o tech lead fez tudo sozinho, o que não deveria"*
+   — Led to the Readiness Gate and strict delegation rules
+
+2. > *"se for implementação com tela, tem imagem mostrando como ser o novo componente?"*
+   — Led to the Readiness Gate's UI/mockup validation requirement
+
+3. > *"apos todas essas regras estarem bem definidas o terminal Developer deveria começar a atuar nisso"*
+   — Led to the "READY before implementation" principle
+
+4. > *"avisar o tech lead 'acabei a tarefa'"*
+   — Led to the "report and wait" protocol for all agents
+
+5. > *"se houver alguma falha na esteira tentar identificar se é infra ou erro de implementação"*
+   — Led to the DevOps's error classification and routing system
+
+6. > *"se erro de implementação o tech lead deve invocar o dev e pedir para corrigir... e ai o fluxo começa novamente"*
+   — Led to the explicit error handling loop that restarts from Phase 2
+
+## Phase 5 — Agent Renaming & Pipeline Reorder
+
+**Date**: 2026-05
+**Trigger**: User found agent names confusing and wanted clearer, industry-standard terminology
+
+### Changes Made
+
+#### Agent Renaming
+
+| Old Name | New Name | Slug Change | Reason |
+|----------|----------|-------------|--------|
+| Business Analyst | **PO** | `biz-analyst` → `po` | Clearer role identity — validates business requirements |
+| Quality Guard | **QA** | `quality-guard` → `qa` | Industry-standard term for quality assurance |
+| Sentinel | **DevOps** | `sentinel` → `devops` | Clearer — monitors CI/CD pipeline and infrastructure |
+
+#### Pipeline Reorder
+
+The execution order was changed so that **QA reviews code quality before PO validates business rules**. The rationale: ensure code is technically sound before spending time on business validation.
+
+| Old Order | New Order |
+|-----------|-----------|
+| Phase 2: Business Analyst (business validation) | Phase 2: QA (quality review + PR) |
+| Phase 3: Quality Guard (quality review + PR) | Phase 3: PO (business validation) |
+
+#### New Pipeline Flow
+
+```
+Tech Lead → Developer → Tech Lead → QA → Tech Lead → PO → Tech Lead → DevOps → Tech Lead
+```
+
+Every agent reports back to the Tech Lead, who decides the next step.
+
+### Files Changed in Phase 5
+
+| Action | File |
+|--------|------|
+| RENAME + REWRITE | `src/templates/agents/po.md` (was `biz-analyst.md`) — Updated all references |
+| RENAME + REWRITE | `src/templates/agents/qa.md` (was `quality-guard.md`) — Updated all references |
+| RENAME + REWRITE | `src/templates/agents/devops.md` (was `sentinel.md`) — Updated all references |
+| MODIFY | `src/templates/agents/tech-lead.md` — Swapped Phase 2/3, updated flow diagram, updated all agent name references |
+| MODIFY | `src/templates/agents/developer.md` — Updated agent name references |
+| MODIFY | `src/generators/workflow.mjs` — Updated slug matching, default names, pipeline order, error handling section |
+| MODIFY | `src/generators/claude-md.mjs` — Updated buildPipeline() and buildDelegationProtocol() with new names and order |
+| MODIFY | `src/generators/agents.mjs` — Updated dynamic generator pipeline order and phase count |
+| MODIFY | `src/generators/maestri.mjs` — Updated AGENT_COLORS slug mappings |
+
+### Quotes That Drove Phase 5 Decisions
+
+1. > *"estou achando os nomes confusos de interpretar"*
+   — Led to renaming all agents to clearer, industry-standard names
+
+2. > *"Tech Lead para Developer volta para Tech Lead, Tech Lead para QA volta para Tech Lead, Tech Lead para PO volta para Tech Lead, Tech Lead para DevOps volta para Tech Lead"*
+   — Led to the pipeline reorder: QA before PO

@@ -255,39 +255,44 @@ function buildAgents(agents) {
 function buildPipeline() {
   return `## Quality Pipeline
 
-The development pipeline follows 8 phases. The Tech Lead orchestrates this automatically after receiving a task.
+The development pipeline follows 7 phases (Phase 0 through Phase 6). The Tech Lead orchestrates this automatically after receiving a task.
+
+### Phase 0 — Readiness Gate ⛩️
+**Agent**: Tech Lead
+Before ANY implementation begins, the Tech Lead validates that the task is "ready":
+- Is there a feature specification? Are business rules defined? Are acceptance criteria explicit?
+- If UI task: Is there a visual mockup? Does it show the component in context?
+- Are there existing patterns to follow?
+
+**Decision**: ✅ READY → proceed | ⚠️ PARTIALLY READY → ask human | ❌ NOT READY → stop, report missing items
 
 ### Phase 1 — Implementation
 **Agent**: Developer
-The Developer implements the feature, writes tests, and follows project patterns.
+The Developer implements the feature, writes tests, and follows project patterns. Reports back to the Tech Lead when done.
 
-### Phase 2 — Business Rules Validation
-**Agent**: Business Analyst
-Validates the implementation against business rules and requirements.
+### Phase 2 — Quality Review + PR
+**Agent**: QA
+Reviews code quality, test coverage, patterns, security, and token efficiency. If approved, opens a PR to the target branch and evaluates merge safety. Reports back to the Tech Lead.
+If changes requested → Developer fixes → re-run Phase 2.
 
-### Phase 3 — Quality Review
-**Agent**: Quality Guard
-Reviews code quality, test coverage, patterns, security, and token efficiency.
+### Phase 3 — Business & Implementation Validation
+**Agent**: PO
+Validates the implementation against business rules, feature specification, and visual mockups (if applicable). Reports back to the Tech Lead.
+If validation fails → Developer fixes → re-run from Phase 2.
 
-### Phase 4 — Branch Verification
-**Agent**: Sentinel
-Checks the target branch for conflicts. If conflicts exist, Developer resolves them.
-
-### Phase 5 — Commit Approval
+### Phase 4 — Human Approval
 **Actor**: Human
-The human reviews the validation chain results and approves the commit.
+The Tech Lead presents a summary of all validation results and the PR status. The human reviews and merges the PR on GitHub.
 
-### Phase 6 — PR + Merge
-**Actor**: Human (on GitHub)
-The human reviews and merges the PR on GitHub.
+### Phase 5 — Deploy Monitoring
+**Agent**: DevOps
+Monitors CI/CD pipeline logs after merge. Classifies errors as:
+- 🏗️ Infrastructure → Tech Lead escalates to human
+- 💻 Code → Tech Lead sends to Developer for fix → re-run from Phase 2
 
-### Phase 7 — Deploy Monitoring
-**Agent**: Sentinel
-Monitors CI/CD pipeline logs. Reports infrastructure errors to human, code errors to Developer.
-
-### Phase 8 — Promotion
-**Actor**: Human + Sentinel
-After human validation in the environment, promotes to next stage (dev → homolog → prod).
+### Phase 6 — Promotion (Optional)
+**Actor**: Human + DevOps
+After human validates in the environment, promotes to next stage (dev → homolog → prod).
 
 ---
 
@@ -297,7 +302,13 @@ After human validation in the environment, promotes to next stage (dev → homol
 function buildDelegationProtocol() {
   return `## Delegation Protocol
 
-The **Tech Lead** orchestrates all work. To delegate to an agent:
+The **Tech Lead** orchestrates all work. All agents report back to the Tech Lead — no agent delegates directly to another.
+
+\`\`\`
+Human ──→ Tech Lead ──→ Agent ──→ Tech Lead ──→ Next Agent ──→ ...
+\`\`\`
+
+To delegate to an agent:
 
 \`\`\`
 maestri ask "<Agent Name>" "<Task description with full context>"
@@ -305,15 +316,21 @@ maestri ask "<Agent Name>" "<Task description with full context>"
 
 Always include:
 1. What needs to be done
-2. Acceptance criteria
-3. Any constraints or dependencies
+2. Feature specification and mockup references (if applicable)
+3. Acceptance criteria
+4. Any constraints or dependencies
 
 ### Agent Communication
 
 - Agents read this CLAUDE.md for project context
 - Each agent has its own .md file in \`.claude/agents/\`
 - The Tech Lead delegates via Maestri connections
-- Agents report back to the Tech Lead when done
+- Agents report back to the Tech Lead when done — then WAIT for next instructions
 - The pipeline phases are followed in order for every task
+- Any code change always restarts validation from Phase 2 (QA)
+
+### Readiness Gate Rule
+
+The Tech Lead must NEVER delegate implementation to the Developer without first confirming readiness (Phase 0). If documentation, mockups, or business rules are missing, the Tech Lead reports to the human and waits.
 `;
 }

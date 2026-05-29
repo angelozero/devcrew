@@ -18,7 +18,7 @@ DevCrew will:
 1. **Scan your repo** — reads `package.json`, `README.md`, `ARCHITECTURE.md`, lock files, git branch, test files, and linting configs
 2. **Show what it detected** — presents the detected info so you can confirm or correct it
 3. **Ask only what's missing** — commit format, Confluence URL, business rules, agent customization
-4. **Generate your workspace** — creates all files needed to run your AI team
+4. **Generate your workspace** — creates all files and configures Maestri with your AI team
 
 ---
 
@@ -31,6 +31,7 @@ Before running DevCrew, make sure you have:
 - **git** — for branch detection
 - **Claude Code** — installed and authenticated
 - **Maestri** — installed (for the visual workspace)
+- **curl** — pre-installed on macOS (used to communicate with Maestri)
 
 ---
 
@@ -45,7 +46,18 @@ npm install
 
 > Do this once. You don't need to install DevCrew globally.
 
-### Step 2 — Go to YOUR project directory
+### Step 2 — Prepare a Maestri workspace
+
+Maestri only accepts workspaces it has created itself. DevCrew needs an existing workspace with one terminal as a starting point.
+
+1. Open **Maestri**
+2. Create a **new workspace** (any name — DevCrew will rename it)
+3. Add **one Claude Code terminal** to the canvas
+4. **Close Maestri** completely (Cmd+Q)
+
+> ⚠️ **Important**: Close Maestri before running DevCrew. DevCrew modifies the workspace file, then launches Maestri and uses its API to recruit the remaining agents.
+
+### Step 3 — Go to YOUR project directory
 
 ```bash
 cd /path/to/your-project
@@ -53,13 +65,13 @@ cd /path/to/your-project
 
 > ⚠️ **Important**: Run DevCrew from inside your project directory, not from the DevCrew directory itself. DevCrew reads your project files and generates workspace files in the current directory.
 
-### Step 3 — Run init
+### Step 4 — Run init
 
 ```bash
 node /path/to/devcrew/bin/devcrew.mjs init
 ```
 
-### Step 4 — Follow the wizard
+### Step 5 — Follow the wizard
 
 The wizard will:
 - Show what it detected from your repo
@@ -68,9 +80,14 @@ The wizard will:
 - Show the 5 default agents and let you customize if needed
 - Ask for final confirmation before generating
 
-### Step 5 — Open Maestri
+DevCrew will then:
+1. Generate all agent files in your project
+2. Configure the Maestri workspace terminal as **Tech Lead** (orchestrator)
+3. Launch Maestri automatically
+4. Recruit the remaining 4 agents via Maestri's CLI API
+5. Connect all agents to the Tech Lead in a **hub/star layout**
 
-After generation, open Maestri. Your new workspace will appear with all agent terminals ready to use.
+When it finishes, Maestri will be open with all 5 agent terminals ready to use.
 
 ---
 
@@ -92,10 +109,10 @@ your-project/
         └── sentinel.md          ← Branch + CI/CD monitor agent
 ```
 
-And in your home directory:
+And configures your Maestri workspace:
 
 ```
-~/.maestri/workspaces/<id>/workspace.json   ← Maestri visual workspace
+~/.maestri/workspaces/<id>/workspace.json   ← 5 terminals in hub layout with connections
 ```
 
 ---
@@ -236,15 +253,16 @@ $ node ~/tools/devcrew/bin/devcrew.mjs init
   ✔ .claude/settings.json
   ✔ .claude/WORKFLOW.md
   ✔ .claude/agents/ (5 agents)
-  ✔ Maestri workspace
+  ✔ Maestri workspace (5 terminals configured)
 
   ✅ DevCrew setup complete!
 
-  Next steps:
-    1. Review the generated CLAUDE.md and enrich it if needed
-    2. Open Maestri to start working with your AI team
-    3. Click on the Tech Lead terminal to begin
+  Your AI team is ready in Maestri:
+    → Tech Lead (orchestrator) connected to all sub-agents
+    → Click on the Tech Lead terminal to begin
 ```
+
+> If no Maestri workspace is found, DevCrew will generate all agent files but show instructions for the Maestri setup step. Just follow them and re-run `devcrew init`.
 
 ---
 
@@ -274,9 +292,26 @@ DevCrew tries to detect your default branch via git. If your project isn't a git
 
 If DevCrew can't detect your stack, it will show empty fields. Just type the values manually in the wizard — all fields accept free-text input.
 
-### Maestri workspace not appearing
+### Maestri workspace — "skipped" or "no workspace found"
 
-Check that Maestri is installed and that `~/.maestri/` exists. DevCrew writes to `~/.maestri/workspaces/` and registers the workspace in `~/.maestri/manifest.json`.
+DevCrew needs an existing Maestri workspace with at least one terminal. To fix:
+
+1. Open Maestri
+2. Create a new workspace
+3. Add one Claude Code terminal
+4. Close Maestri completely (Cmd+Q)
+5. Re-run `devcrew init`
+
+### Maestri workspace — "terminal not active"
+
+DevCrew launched Maestri but couldn't communicate with the workspace terminal. Make sure:
+
+1. The workspace is open in Maestri (not just the app — the workspace itself)
+2. Close Maestri, then re-run `devcrew init` (it will relaunch Maestri)
+
+### Maestri workspace — could not recruit agents
+
+If some agents failed to recruit, you can re-run `devcrew init` — it will detect existing agents and only recruit the missing ones.
 
 ---
 
@@ -302,7 +337,7 @@ devcrew/
 │   │   ├── settings.mjs     ← Generates .claude/settings.json
 │   │   ├── workflow.mjs     ← Generates .claude/WORKFLOW.md
 │   │   ├── agents.mjs       ← Generates .claude/agents/*.md
-│   │   └── maestri.mjs      ← Generates Maestri workspace
+│   │   └── maestri.mjs      ← Configures Maestri workspace via CLI API
 │   ├── context/
 │   │   └── confluence.mjs   ← Context processor
 │   └── templates/
